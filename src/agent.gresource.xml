@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gresources>
+  <gresource prefix="/io/github/orkwitzel/Agent">
+    <file preprocess="xml-stripblanks" alias="ui/window.ui">window.ui</file>
+    <file preprocess="xml-stripblanks" alias="ui/preferences.ui">preferences.ui</file>
+  </gresource>
+</gresources>

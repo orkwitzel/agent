@@ -1,0 +1,80 @@
+{
+    "id" : "io.github.orkwitzel.Agent",
+    "runtime" : "org.gnome.Platform",
+    "runtime-version" : "51",
+    "sdk" : "org.gnome.Sdk",
+    "command" : "agent",
+    "finish-args" : [
+        "--share=network",
+        "--share=ipc",
+        "--socket=fallback-x11",
+        "--socket=wayland",
+        "--device=dri",
+        "--talk-name=org.freedesktop.Flatpak",
+        "--filesystem=host"
+    ],
+    "cleanup" : [
+        "/include",
+        "/lib/pkgconfig",
+        "/man",
+        "/share/doc",
+        "/share/gtk-doc",
+        "/share/man",
+        "/share/pkgconfig",
+        "*.la",
+        "*.a"
+    ],
+    "modules" : [
+        {
+            "name" : "python3-markdown-it-py",
+            "buildsystem" : "simple",
+            "build-commands" : [
+                "pip3 install --verbose --exists-action=i --no-index --find-links=\"file://${PWD}\" --prefix=${FLATPAK_DEST} \"markdown-it-py\" --no-build-isolation"
+            ],
+            "sources" : [
+                {
+                    "type" : "file",
+                    "url" : "https://files.pythonhosted.org/packages/b3/81/4da04ced5a082363ecfa159c010d200ecbd959ae410c10c0264a38cac0f5/markdown_it_py-4.2.0-py3-none-any.whl",
+                    "sha256" : "9f7ebbcd14fe59494226453aed97c1070d83f8d24b6fc3a3bcf9a38092641c4a"
+                },
+                {
+                    "type" : "file",
+                    "url" : "https://files.pythonhosted.org/packages/b3/38/89ba8ad64ae25be8de66a6d463314cf1eb366222074cfda9ee839c56a4b4/mdurl-0.1.2-py3-none-any.whl",
+                    "sha256" : "84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8"
+                }
+            ]
+        },
+        {
+            "name" : "blueprint-compiler",
+            "buildsystem" : "meson",
+            "cleanup" : [
+                "*"
+            ],
+            "sources" : [
+                {
+                    "type" : "git",
+                    "url" : "https://gitlab.gnome.org/GNOME/blueprint-compiler.git",
+                    "tag" : "v0.22.2",
+                    "commit" : "c052dbc94df88787d4bae2a4193aaf0039195ed7"
+                }
+            ]
+        },
+        {
+            "name" : "agent",
+            "builddir" : true,
+            "buildsystem" : "meson",
+            "sources" : [
+                {
+                    "type" : "dir",
+                    "path" : "../.."
+                }
+            ],
+            "config-opts" : [
+                "--libdir=lib"
+            ]
+        }
+    ],
+    "build-options" : {
+        "env" : {        }
+    }
+}

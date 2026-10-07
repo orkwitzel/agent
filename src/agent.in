@@ -1,0 +1,26 @@
+#!@PYTHON@
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+import gettext
+import locale
+import os
+import signal
+import sys
+
+VERSION = '@VERSION@'
+pkgdatadir = '@pkgdatadir@'
+localedir = '@localedir@'
+
+sys.path.insert(1, pkgdatadir)
+signal.signal(signal.SIGINT, signal.SIG_DFL)
+locale.bindtextdomain('agent', localedir)
+locale.textdomain('agent')
+gettext.install('agent', localedir)
+
+if __name__ == '__main__':
+    from gi.repository import Gio
+    resource = Gio.Resource.load(os.path.join(pkgdatadir, 'agent.gresource'))
+    resource._register()
+
+    from agent import main
+    sys.exit(main.main(VERSION))

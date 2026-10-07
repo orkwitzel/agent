@@ -1,0 +1,14 @@
+/build/
+/_install/
+/.flatpak-builder/
+/.flatpak/
+/repo/
+*.flatpak
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+/subprojects/*/
+!/subprojects/*.wrap
+.scratch/
+/subprojects/.wraplock

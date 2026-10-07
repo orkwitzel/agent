@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist gettext-domain="agent">
+  <schema id="io.github.orkwitzel.Agent" path="/io/github/orkwitzel/Agent/">
+    <key name="claude-path" type="s">
+      <default>''</default>
+      <summary>Path to the claude executable</summary>
+      <description>Leave empty to look up claude on PATH.</description>
+    </key>
+    <key name="default-model" type="s">
+      <default>''</default>
+      <summary>Default model for new threads</summary>
+      <description>Model alias or ID passed to claude. Empty means Claude's own default.</description>
+    </key>
+    <key name="generate-titles" type="b">
+      <default>false</default>
+      <summary>Generate thread titles with AI</summary>
+      <description>Run a short one-shot claude call after the first reply to title the thread. Uses subscription usage.</description>
+    </key>
+    <key name="show-token-counts" type="b">
+      <default>true</default>
+      <summary>Show per-turn token counts</summary>
+    </key>
+    <key name="check-for-updates" type="b">
+      <default>true</default>
+      <summary>Check GitHub Releases for a newer version on launch</summary>
+    </key>
+    <key name="bypass-warning-acknowledged" type="b">
+      <default>false</default>
+      <summary>Whether the auto-allow permissions warning was acknowledged</summary>
+    </key>
+    <key name="window-width" type="i">
+      <default>1100</default>
+      <summary>Window width</summary>
+    </key>
+    <key name="window-height" type="i">
+      <default>720</default>
+      <summary>Window height</summary>
+    </key>
+    <key name="window-maximized" type="b">
+      <default>false</default>
+      <summary>Window maximized state</summary>
+    </key>
+  </schema>
+</schemalist>

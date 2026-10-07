@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Agent
+Comment=Work with AI coding agents
+Exec=agent
+Icon=@APP_ID@
+Terminal=false
+Type=Application
+Categories=Development;GTK;
+Keywords=AI;Claude;coding;assistant;
+StartupNotify=true
+DBusActivatable=false

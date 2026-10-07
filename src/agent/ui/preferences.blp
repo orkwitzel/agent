@@ -1,0 +1,43 @@
+using Gtk 4.0;
+using Adw 1;
+
+template $AgentPreferencesDialog: Adw.PreferencesDialog {
+  Adw.PreferencesPage {
+    Adw.PreferencesGroup {
+      title: _("Claude Code");
+
+      Adw.EntryRow claude_path_row {
+        title: _("Executable Path");
+        tooltip-text: _("Leave empty to find claude on your PATH");
+      }
+
+      Adw.EntryRow default_model_row {
+        title: _("Default Model for New Threads");
+        tooltip-text: _("For example opus, sonnet or haiku. Leave empty for Claude's default.");
+      }
+    }
+
+    Adw.PreferencesGroup {
+      title: _("Threads");
+
+      Adw.SwitchRow generate_titles_row {
+        title: _("Generate Titles with AI");
+        subtitle: _("Uses a small amount of your Claude usage per thread");
+      }
+
+      Adw.SwitchRow token_counts_row {
+        title: _("Show Token Counts");
+        subtitle: _("Under each reply");
+      }
+    }
+
+    Adw.PreferencesGroup {
+      title: _("Updates");
+
+      Adw.SwitchRow updates_row {
+        title: _("Check for Updates");
+        subtitle: _("Looks for a newer release on GitHub at launch");
+      }
+    }
+  }
+}

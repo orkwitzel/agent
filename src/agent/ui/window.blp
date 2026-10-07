@@ -1,0 +1,182 @@
+using Gtk 4.0;
+using Adw 1;
+
+template $AgentWindow: Adw.ApplicationWindow {
+  title: _("Agent");
+  width-request: 360;
+  height-request: 294;
+
+  Adw.Breakpoint {
+    condition ("max-width: 600sp")
+
+    setters {
+      split_view.collapsed: true;
+    }
+  }
+
+  content: Adw.NavigationSplitView split_view {
+    sidebar: Adw.NavigationPage {
+      title: _("Agent");
+
+      child: Adw.ToolbarView {
+        [top]
+        Adw.HeaderBar {
+          [start]
+          Gtk.Button {
+            icon-name: "folder-new-symbolic";
+            tooltip-text: _("Add Project");
+            action-name: "win.add-project";
+          }
+
+          [end]
+          Gtk.MenuButton {
+            primary: true;
+            icon-name: "open-menu-symbolic";
+            tooltip-text: _("Main Menu");
+            menu-model: primary_menu;
+          }
+        }
+
+        content: Gtk.Stack sidebar_stack {
+          Gtk.StackPage {
+            name: "empty";
+
+            child: Adw.StatusPage {
+              icon-name: "folder-symbolic";
+              title: _("No Projects");
+              description: _("Add a project folder to start a thread");
+
+              child: Gtk.Button {
+                label: _("_Add Project");
+                use-underline: true;
+                halign: center;
+                action-name: "win.add-project";
+
+                styles [
+                  "pill",
+                  "suggested-action",
+                ]
+              };
+
+              styles [
+                "compact",
+              ]
+            };
+          }
+
+          Gtk.StackPage {
+            name: "projects";
+
+            child: Gtk.ScrolledWindow {
+              hscrollbar-policy: never;
+
+              child: Gtk.ListBox project_list {
+                styles [
+                  "navigation-sidebar",
+                ]
+              };
+            };
+          }
+        };
+      };
+    };
+
+    content: Adw.NavigationPage {
+      title: _("Thread");
+
+      child: Adw.ToolbarView {
+        [top]
+        Adw.HeaderBar {}
+
+        content: Gtk.Stack content_stack {
+          Gtk.StackPage {
+            name: "checking";
+
+            child: Adw.Spinner {
+              halign: center;
+              valign: center;
+              width-request: 32;
+              height-request: 32;
+            };
+          }
+
+          Gtk.StackPage {
+            name: "missing";
+
+            child: Adw.StatusPage {
+              icon-name: "dialog-warning-symbolic";
+              title: _("Claude Code Not Found");
+              description: _("Agent works with the Claude Code command-line tool. Install it, then set its location in Preferences if it isn't on your PATH.");
+
+              child: Gtk.Box {
+                orientation: vertical;
+                spacing: 12;
+                halign: center;
+
+                Gtk.LinkButton download_link {
+                  label: _("Download Claude Code");
+                }
+
+                Gtk.Button {
+                  label: _("_Check Again");
+                  use-underline: true;
+                  action-name: "win.check-claude";
+
+                  styles [
+                    "pill",
+                  ]
+                }
+              };
+            };
+          }
+
+          Gtk.StackPage {
+            name: "signed-out";
+
+            child: Adw.StatusPage {
+              icon-name: "system-users-symbolic";
+              title: _("Sign In to Claude");
+              description: _("Claude Code is installed but not signed in. Run “claude auth login” in a terminal, then check again.");
+
+              child: Gtk.Button {
+                label: _("_Check Again");
+                use-underline: true;
+                halign: center;
+                action-name: "win.check-claude";
+
+                styles [
+                  "pill",
+                  "suggested-action",
+                ]
+              };
+            };
+          }
+
+          Gtk.StackPage {
+            name: "ready";
+
+            child: Adw.StatusPage {
+              icon-name: "io.github.orkwitzel.Agent-symbolic";
+              title: _("No Thread Selected");
+              description: _("Pick a project to start working with Claude");
+            };
+          }
+        };
+      };
+    };
+  };
+}
+
+menu primary_menu {
+  section {
+    item {
+      label: _("_Preferences");
+      action: "app.preferences";
+    }
+
+    item {
+      label: _("_About Agent");
+      action: "app.about";
+    }
+  }
+}

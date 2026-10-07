@@ -1,0 +1,21 @@
+# Tooling config only. The app is built and installed with Meson.
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+extend-exclude = ["subprojects", "build", "_install"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["agent", "conftest"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = [
+    # Raised inside PyGObject itself on Python 3.14; not ours to fix.
+    "ignore::DeprecationWarning:gi.*",
+    "ignore::gi.PyGIDeprecationWarning",
+]
