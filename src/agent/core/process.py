@@ -35,16 +35,70 @@ def install_glib_event_loop() -> None:
         asyncio.set_event_loop_policy(GLibEventLoopPolicy())
 
 
+def _is_cancelled(error: GLib.Error) -> bool:
+    return error.matches(Gio.io_error_quark(), Gio.IOErrorEnum.CANCELLED)
+
+
+async def _gio(start, finish, *args, cancellable: Gio.Cancellable | None = None):
+    """Await the Gio async call `start(*args)`; return `finish(result)`.
+
+    The call gets its own Gio.Cancellable, which is cancelled when
+    `cancellable` is, or when the awaiting task is cancelled. In that
+    case the call is cancelled and waited for before CancelledError is
+    re-raised, so it isn't still pending on the stream or process.
+
+    This uses the callback form instead of awaiting PyGObject's Async
+    object, because before PyGObject 3.56.3 Async.cancel() rejects the
+    argument asyncio passes it, so cancelling the task raises TypeError
+    and the await stays pending.
+    """
+    future = asyncio.get_running_loop().create_future()
+    call = Gio.Cancellable()
+
+    def done(_source, result):
+        try:
+            future.set_result(finish(result))
+        except Exception as error:
+            future.set_exception(error)
+
+    # Gio's Cancellable.connect (not GObject's): runs at once if already cancelled.
+    link = cancellable.connect(call.cancel) if cancellable is not None else 0
+    try:
+        start(*args, call, done)
+        # asyncio.wait never cancels `future`, and unlike asyncio.shield it
+        # doesn't log the CANCELLED error the call ends with.
+        try:
+            await asyncio.wait([future])
+        except asyncio.CancelledError:
+            call.cancel()
+            await asyncio.wait([future])
+            future.exception()  # the outcome is dropped; mark it retrieved
+            raise
+        return future.result()
+    finally:
+        if link:
+            cancellable.disconnect(link)
+
+
 async def run_capture(argv: list[str], cwd: str | None = None) -> tuple[int, str]:
-    """Run a short command; return (exit status, stdout)."""
+    """Run a short command; return (exit status, stdout).
+
+    Cancelling the awaiting task kills the command.
+    """
     launcher = Gio.SubprocessLauncher.new(
         Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE
     )
     if cwd:
         launcher.set_cwd(cwd)
     proc = launcher.spawnv(argv)
-    _ok, stdout, _stderr = await proc.communicate_utf8_async(None, None)
-    await proc.wait_async(None)
+    try:
+        _ok, stdout, _stderr = await _gio(
+            proc.communicate_utf8_async, proc.communicate_utf8_finish, None
+        )
+        await _gio(proc.wait_async, proc.wait_finish)
+    except asyncio.CancelledError:
+        proc.force_exit()
+        raise
     status = proc.get_exit_status() if proc.get_if_exited() else -1
     return status, stdout or ""
 
@@ -55,6 +109,9 @@ class AgentProcess:
     Reads stream-json from stdout and yields neutral events. With
     `auto_allow` (v1 behaviour) every permission request is approved
     in code; the request is still yielded so the UI can show it.
+
+    Every pending call can be cancelled by cancelling the task awaiting
+    it, and kill() cancels all of them.
     """
 
     def __init__(
@@ -71,6 +128,7 @@ class AgentProcess:
         self._on_stderr = on_stderr
         self._proc: Gio.Subprocess | None = None
         self._stdin: Gio.OutputStream | None = None
+        self._cancellable = Gio.Cancellable()
         self._ids = itertools.count(1)
 
     @property
@@ -96,7 +154,13 @@ class AgentProcess:
     async def send(self, message: dict) -> None:
         assert self._stdin is not None, "process not started"
         data = claude_stream.encode(message)
-        await self._stdin.write_all_async(data, GLib.PRIORITY_DEFAULT, None)
+        await _gio(
+            self._stdin.write_all_async,
+            self._stdin.write_all_finish,
+            data,
+            GLib.PRIORITY_DEFAULT,
+            cancellable=self._cancellable,
+        )
 
     async def send_user_message(
         self, text: str, images: list[tuple[str, str]] | None = None
@@ -107,34 +171,61 @@ class AgentProcess:
         await self.send(claude_stream.interrupt(self.next_request_id()))
 
     async def events(self) -> AsyncIterator[Event]:
+        """Yield events until stdout closes or kill() is called."""
         assert self._proc is not None, "process not started"
         stream = Gio.DataInputStream.new(self._proc.get_stdout_pipe())
-        while True:
-            line, _length = await stream.read_line_async(GLib.PRIORITY_DEFAULT, None)
-            if line is None:
-                return
-            for event in claude_stream.parse_line(line):
-                if self._auto_allow and isinstance(event, PermissionRequest):
-                    await self.send(claude_stream.allow_tool(event))
-                yield event
+        try:
+            while (line := await self._read_line(stream)) is not None:
+                for event in claude_stream.parse_line(line):
+                    if self._auto_allow and isinstance(event, PermissionRequest):
+                        await self.send(claude_stream.allow_tool(event))
+                    yield event
+        except GLib.Error as error:
+            if not _is_cancelled(error):
+                raise
 
     async def close(self) -> int:
-        """Close stdin and wait for exit. Returns the exit status."""
+        """Close stdin and wait for exit.
+
+        Returns the exit status, or -1 if the process was killed.
+        """
         if self._proc is None:
             return -1
-        if self._stdin is not None and not self._stdin.is_closed():
-            await self._stdin.close_async(GLib.PRIORITY_DEFAULT, None)
-        await self._proc.wait_async(None)
+        try:
+            if self._stdin is not None and not self._stdin.is_closed():
+                await _gio(
+                    self._stdin.close_async,
+                    self._stdin.close_finish,
+                    GLib.PRIORITY_DEFAULT,
+                    cancellable=self._cancellable,
+                )
+            await _gio(self._proc.wait_async, self._proc.wait_finish, cancellable=self._cancellable)
+        except GLib.Error as error:
+            if not _is_cancelled(error):
+                raise
+            return -1
         return self._proc.get_exit_status() if self._proc.get_if_exited() else -1
 
     def kill(self) -> None:
+        """Kill the process and cancel everything pending on it."""
+        self._cancellable.cancel()
         if self._proc is not None:
             self._proc.force_exit()
 
+    async def _read_line(self, stream: Gio.DataInputStream) -> bytes | None:
+        line, _length = await _gio(
+            stream.read_line_async,
+            stream.read_line_finish,
+            GLib.PRIORITY_DEFAULT,
+            cancellable=self._cancellable,
+        )
+        return line
+
     async def _drain_stderr(self) -> None:
         stream = Gio.DataInputStream.new(self._proc.get_stderr_pipe())
-        while True:
-            line, _length = await stream.read_line_async(GLib.PRIORITY_DEFAULT, None)
-            if line is None:
-                return
-            self._on_stderr(line.decode("utf-8", errors="replace"))
+        try:
+            while (line := await self._read_line(stream)) is not None:
+                self._on_stderr(line.decode("utf-8", errors="replace"))
+        except GLib.Error as error:
+            if not _is_cancelled(error):
+                raise
