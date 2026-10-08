@@ -3,6 +3,7 @@
 
 import asyncio
 import contextlib
+import gc
 import json
 import os
 import signal
@@ -33,10 +34,11 @@ async def collect(events):
 async def turn(proc):
     """Iterate events() up to and including TurnCompleted."""
     seen = []
-    async for event in proc.events():
-        seen.append(event)
-        if isinstance(event, TurnCompleted):
-            break
+    async with contextlib.aclosing(proc.events()) as events:
+        async for event in events:
+            seen.append(event)
+            if isinstance(event, TurnCompleted):
+                break
     return seen
 
 
@@ -94,11 +96,15 @@ def test_events_task_can_be_cancelled():
             await asyncio.wait([reader], timeout=1)
             if not reader.done():
                 return False, None, None
+            cancelled = reader.cancelled()
+            # Free the cancelled iteration, and its stream with it.
+            del reader
+            gc.collect()
             # Only that read was cancelled; the process is still usable.
             await proc.send_user_message("hello")
             seen = await asyncio.wait_for(turn(proc), 5)
             status = await asyncio.wait_for(proc.close(), 5)
-            return reader.cancelled(), seen, status
+            return cancelled, seen, status
         finally:
             proc.kill()
 
@@ -106,6 +112,38 @@ def test_events_task_can_be_cancelled():
     assert cancelled
     assert isinstance(seen[-1], TurnCompleted)
     assert status == 0
+
+
+def test_cancelling_twice_still_waits_for_the_read():
+    argv = [sys.executable, str(FAKE_CLAUDE), str(FIXTURES / "simple_turn.jsonl")]
+    errors = []
+
+    async def scenario():
+        asyncio.get_running_loop().set_exception_handler(lambda _loop, ctx: errors.append(ctx))
+        proc = AgentProcess(argv)
+        proc.start()
+        try:
+            reader = asyncio.ensure_future(collect(proc.events()))
+            await asyncio.sleep(0.2)
+            reader.cancel()
+            await asyncio.sleep(0)  # the reader is now waiting for the read to end
+            reader.cancel()
+            await asyncio.wait([reader], timeout=1)
+            if not reader.done():
+                return False
+            cancelled = reader.cancelled()
+            del reader
+            gc.collect()
+            # The cancelled read has ended, so a new one can start on the stream.
+            await proc.send_user_message("hello")
+            await asyncio.wait_for(turn(proc), 5)
+            return cancelled
+        finally:
+            proc.kill()
+
+    assert run(scenario())
+    gc.collect()
+    assert errors == []
 
 
 def test_kill_ends_events_while_stdout_stays_open(tmp_path):
