@@ -8,3 +8,7 @@ object per line, replayed by `tests/fake_claude.py`.
 supplement it with real recordings (`claude -p --output-format stream-json
 --verbose ... > fixture.jsonl`) so protocol changes in new Claude Code
 releases show up as test failures.
+
+`unknown_control_request.jsonl` sends a `control_request` with a subtype
+Agent doesn't handle. The fake waits for our reply, so it proves we answer
+such requests with an error instead of leaving the CLI waiting.

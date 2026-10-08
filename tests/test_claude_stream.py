@@ -83,6 +83,29 @@ def test_control_reply():
     assert claude_stream.parse_line(line) == [ControlReply("agent-1", True, {"percentage": 12})]
 
 
+def test_unknown_control_request_is_kept():
+    events = parse_fixture("unknown_control_request.jsonl")
+    assert [type(e) for e in events] == [SessionStarted, Unrecognized, AssistantText, TurnCompleted]
+    assert events[1].raw["request"]["subtype"] == "future_subtype"
+
+
+def test_unsupported_control_request_reply():
+    request = parse_fixture("unknown_control_request.jsonl")[1]
+    assert claude_stream.unsupported_control_request(request.raw) == {
+        "type": "control_response",
+        "response": {
+            "subtype": "error",
+            "request_id": "cli-req-1",
+            "error": "Agent does not support future_subtype",
+        },
+    }
+
+
+def test_unsupported_control_request_ignores_other_messages():
+    assert claude_stream.unsupported_control_request({"type": "stream_event"}) is None
+    assert claude_stream.unsupported_control_request({"type": "mystery_block"}) is None
+
+
 def test_allow_tool_echoes_input():
     request = PermissionRequest("cli-req-1", "Read", {"file_path": "/x"}, "toolu_01")
     assert claude_stream.allow_tool(request) == {
