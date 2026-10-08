@@ -14,7 +14,12 @@ from pathlib import Path
 import pytest
 
 from agent.core.events import PermissionRequest, TurnCompleted
-from agent.core.process import AgentProcess, install_glib_event_loop, run_capture
+from agent.core.process import (
+    STDERR_TAIL_BYTES,
+    AgentProcess,
+    install_glib_event_loop,
+    run_capture,
+)
 from conftest import FAKE_CLAUDE, FIXTURES
 
 
@@ -88,6 +93,74 @@ def test_turn_with_auto_allow(tmp_path):
     assert sent[0]["type"] == "user"
     assert sent[1]["response"]["request_id"] == "cli-req-1"
     assert sent[1]["response"]["response"]["behavior"] == "allow"
+
+
+STDERR_BYTES = 200_000  # well past the 64 KiB pipe buffer
+
+
+def test_large_stderr_without_callback(monkeypatch):
+    monkeypatch.setenv("FAKE_CLAUDE_STDERR_BYTES", str(STDERR_BYTES))
+    proc = AgentProcess([sys.executable, str(FAKE_CLAUDE), str(FIXTURES / "simple_turn.jsonl")])
+
+    seen, status = run(one_turn(proc))
+    assert seen and isinstance(seen[-1], TurnCompleted)
+    assert status == 0
+    assert len(proc.stderr_tail.encode()) == STDERR_TAIL_BYTES
+
+
+def test_stderr_tail_after_exit(monkeypatch):
+    monkeypatch.setenv("FAKE_CLAUDE_STDERR_BYTES", str(STDERR_BYTES))
+    lines = []
+    proc = AgentProcess(
+        [sys.executable, str(FAKE_CLAUDE), str(FIXTURES / "simple_turn.jsonl")],
+        on_stderr=lines.append,
+    )
+
+    _seen, status = run(one_turn(proc))
+    assert status == 0
+    written = "".join(f"{line}\n" for line in lines)
+    assert len(written) >= STDERR_BYTES
+    assert proc.stderr_tail == written[-STDERR_TAIL_BYTES:]
+
+
+def test_failing_stderr_callback_keeps_draining(monkeypatch):
+    monkeypatch.setenv("FAKE_CLAUDE_STDERR_BYTES", str(STDERR_BYTES))
+    lines = []
+
+    def on_stderr(line):
+        lines.append(line)
+        if len(lines) == 1:
+            raise ValueError("bug in the callback")
+
+    proc = AgentProcess(
+        [sys.executable, str(FAKE_CLAUDE), str(FIXTURES / "simple_turn.jsonl")],
+        on_stderr=on_stderr,
+    )
+
+    seen, status = run(one_turn(proc))
+    assert isinstance(seen[-1], TurnCompleted)
+    assert status == 0
+    assert len(lines) > 1
+
+
+def test_stderr_tail_after_crash():
+    # 3-byte characters, so the cut at STDERR_TAIL_BYTES splits one.
+    script = (
+        "import sys\n"
+        f"sys.stderr.buffer.write('\\u20ac'.encode() * {STDERR_TAIL_BYTES})\n"
+        "sys.exit(3)\n"
+    )
+    proc = AgentProcess([sys.executable, "-c", script])
+
+    async def scenario():
+        proc.start()
+        try:
+            return await asyncio.wait_for(proc.close(), TIMEOUT)
+        finally:
+            proc.kill()
+
+    assert run(scenario()) == 3
+    assert proc.stderr_tail == "\u20ac" * (STDERR_TAIL_BYTES // 3)
 
 
 def test_run_capture():

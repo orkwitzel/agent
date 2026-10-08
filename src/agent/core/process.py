@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import itertools
+import logging
 import warnings
 from collections.abc import AsyncIterator, Callable
 
@@ -20,6 +21,19 @@ from gi.repository import Gio, GLib  # noqa: E402
 
 from agent.core import claude_stream  # noqa: E402
 from agent.core.events import Event, PermissionRequest  # noqa: E402
+
+# How much of the end of stderr AgentProcess keeps, to explain an exit.
+STDERR_TAIL_BYTES = 8192
+
+# How long close() waits for the rest of stderr once the process has exited.
+# A hook or MCP server that inherited the pipe can keep it open for longer.
+_STDERR_EOF_TIMEOUT = 1.0
+
+# UTF-8 continuation bytes, left at the start of the tail when the cut
+# falls inside a character.
+_UTF8_CONTINUATION = bytes(range(0x80, 0xC0))
+
+_log = logging.getLogger(__name__)
 
 
 def install_glib_event_loop() -> None:
@@ -140,12 +154,25 @@ class AgentProcess:
         self._proc: Gio.Subprocess | None = None
         self._stdin: Gio.OutputStream | None = None
         self._stdout: Gio.DataInputStream | None = None
+        self._stderr_task: asyncio.Task | None = None
+        self._stderr_tail = bytearray()
         self._cancellable = Gio.Cancellable()
         self._ids = itertools.count(1)
 
     @property
     def running(self) -> bool:
         return self._proc is not None and self._proc.get_identifier() is not None
+
+    @property
+    def stderr_tail(self) -> str:
+        """The last STDERR_TAIL_BYTES bytes the process wrote to stderr, decoded.
+
+        Once close() has returned it holds what the process wrote before it
+        exited, so the UI can show why it exited. A hook or MCP server that
+        inherited stderr can still add to it after that.
+        """
+        tail = self._stderr_tail.lstrip(_UTF8_CONTINUATION)
+        return tail.decode("utf-8", errors="replace")
 
     def start(self) -> None:
         launcher = Gio.SubprocessLauncher.new(
@@ -161,8 +188,8 @@ class AgentProcess:
         # call keeps its buffered data, and freeing an iteration doesn't close
         # the pipe (a DataInputStream closes its base stream when disposed).
         self._stdout = Gio.DataInputStream.new(self._proc.get_stdout_pipe())
-        if self._on_stderr:
-            self._stderr_task = asyncio.ensure_future(self._drain_stderr())
+        # Always drain stderr: once the pipe buffer fills, the child blocks.
+        self._stderr_task = asyncio.ensure_future(self._drain_stderr())
 
     def next_request_id(self) -> str:
         return f"agent-{next(self._ids)}"
@@ -228,6 +255,8 @@ class AgentProcess:
             if not _is_cancelled(error):
                 raise
             return -1
+        if self._stderr_task is not None:
+            await asyncio.wait([self._stderr_task], timeout=_STDERR_EOF_TIMEOUT)
         return self._proc.get_exit_status() if self._proc.get_if_exited() else -1
 
     def kill(self) -> None:
@@ -256,10 +285,45 @@ class AgentProcess:
         return line
 
     async def _drain_stderr(self) -> None:
-        stream = Gio.DataInputStream.new(self._proc.get_stderr_pipe())
+        """Read stderr until EOF or kill(), keeping its tail and passing lines to on_stderr.
+
+        Reads raw chunks rather than lines, so stderr that isn't UTF-8 can't
+        end the drain.
+        """
+        pipe = self._proc.get_stderr_pipe()
+        partial = bytearray()
         try:
-            while (line := await self._read_line(stream)) is not None:
-                self._on_stderr(line)
+            while True:
+                chunk = await _gio(
+                    pipe.read_bytes_async,
+                    pipe.read_bytes_finish,
+                    4096,
+                    GLib.PRIORITY_DEFAULT,
+                    cancellable=self._cancellable,
+                )
+                if chunk.get_size() == 0:
+                    break
+                data = chunk.get_data()
+                self._stderr_tail += data
+                del self._stderr_tail[:-STDERR_TAIL_BYTES]
+                if self._on_stderr:
+                    # Split only the new data, so a long line isn't copied per chunk.
+                    *lines, rest = data.split(b"\n")
+                    for line in lines:
+                        partial += line
+                        self._emit_stderr(partial)
+                        partial.clear()
+                    partial += rest
         except GLib.Error as error:
+            # Nothing awaits this task, so log rather than raise.
             if not _is_cancelled(error):
-                raise
+                _log.warning("Reading stderr failed: %s", error.message)
+        if self._on_stderr and partial:
+            self._emit_stderr(partial)
+
+    def _emit_stderr(self, line: bytearray) -> None:
+        # A failing callback must not end the drain, or the child blocks again.
+        try:
+            self._on_stderr(line.decode("utf-8", errors="replace"))
+        except Exception:
+            _log.exception("on_stderr callback failed")
