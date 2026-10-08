@@ -240,10 +240,16 @@ class AgentProcess:
         if self._proc is not None:
             self._proc.force_exit()
 
-    async def _read_line(self, stream: Gio.DataInputStream) -> bytes | None:
+    async def _read_line(self, stream: Gio.DataInputStream) -> str | None:
+        """Read one line; None at end of stream.
+
+        Uses read_line_finish_utf8: read_line_finish returns b"" both for
+        an empty line and at end of stream (PyGObject 3.56.3), so it can't
+        tell when to stop. A line that isn't UTF-8 raises GLib.Error.
+        """
         line, _length = await _gio(
             stream.read_line_async,
-            stream.read_line_finish,
+            stream.read_line_finish_utf8,
             GLib.PRIORITY_DEFAULT,
             cancellable=self._cancellable,
         )
@@ -253,7 +259,7 @@ class AgentProcess:
         stream = Gio.DataInputStream.new(self._proc.get_stderr_pipe())
         try:
             while (line := await self._read_line(stream)) is not None:
-                self._on_stderr(line.decode("utf-8", errors="replace"))
+                self._on_stderr(line)
         except GLib.Error as error:
             if not _is_cancelled(error):
                 raise

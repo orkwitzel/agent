@@ -218,3 +218,20 @@ def test_run_capture_timeout_kills_child(tmp_path):
     elapsed, still_alive = run(scenario())
     assert 0.9 < elapsed < 2
     assert not still_alive
+
+
+def test_events_end_at_end_of_stream():
+    # A blank line doesn't end the stream; closing stdout does, even
+    # before TurnCompleted.
+    argv = ["sh", "-c", 'printf \'\\n{"type":"mystery"}\\n\\n\'']
+
+    async def scenario():
+        proc = AgentProcess(argv)
+        proc.start()
+        try:
+            return await asyncio.wait_for(collect(proc.events()), TIMEOUT)
+        finally:
+            proc.kill()
+
+    seen = run(scenario())
+    assert [event.raw for event in seen] == [{"type": "mystery"}]  # Unrecognized
