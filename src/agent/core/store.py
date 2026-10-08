@@ -16,6 +16,20 @@ from pathlib import Path
 
 from agent.core import events as ev
 
+_APP_ID = "io.github.orkwitzel.Agent"
+
+
+def database_path(data_dir: str | Path) -> Path:
+    """Return `<data_dir>/<app id>/agent.db`, creating the folder if needed.
+
+    The caller passes `GLib.get_user_data_dir()`; it is a parameter because
+    GLib caches that value, so tests can't redirect it with `XDG_DATA_HOME`.
+    """
+    directory = Path(data_dir) / _APP_ID
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return directory / "agent.db"
+
+
 _MIGRATIONS = [
     """
     CREATE TABLE projects (

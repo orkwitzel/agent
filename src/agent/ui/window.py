@@ -1,20 +1,13 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 import asyncio
-import os
 from gettext import gettext as _
 
 from gi.repository import Adw, Gio, GLib, Gtk
 
 from agent.core import claude_cli, hostspawn
 from agent.core.process import run_capture
-from agent.core.store import Project, Store
-
-
-def _store_path() -> str:
-    directory = os.path.join(GLib.get_user_data_dir(), "agent")
-    os.makedirs(directory, exist_ok=True)
-    return os.path.join(directory, "agent.db")
+from agent.core.store import Project, Store, database_path
 
 
 @Gtk.Template(resource_path="/io/github/orkwitzel/Agent/ui/window.ui")
@@ -30,7 +23,7 @@ class AgentWindow(Adw.ApplicationWindow):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.settings = self.get_application().settings
-        self.store = Store(_store_path())
+        self.store = Store(database_path(GLib.get_user_data_dir()))
         self._tasks: set[asyncio.Task] = set()
 
         self.download_link.set_uri(claude_cli.DOWNLOAD_URL)
