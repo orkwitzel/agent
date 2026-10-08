@@ -55,8 +55,15 @@ class AgentWindow(Adw.ApplicationWindow):
         except GLib.Error:
             self.content_stack.set_visible_child_name("missing")
             return
+        # The exit status is ignored: claude exits 1 when signed out.
         auth = claude_cli.parse_auth_status(output)
-        self.content_stack.set_visible_child_name("ready" if auth.logged_in else "signed-out")
+        if auth is None:
+            page = "missing"
+        elif auth.logged_in:
+            page = "ready"
+        else:
+            page = "signed-out"
+        self.content_stack.set_visible_child_name(page)
 
     # Projects
 
