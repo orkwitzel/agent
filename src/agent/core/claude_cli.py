@@ -62,23 +62,27 @@ def auth_login_argv(claude_path: str) -> list[str]:
     return [claude_path, "auth", "login"]
 
 
+def version_argv(claude_path: str) -> list[str]:
+    return [claude_path, "--version"]
+
+
 def parse_auth_status(output: str) -> AuthStatus | None:
     """Parse the JSON that `claude auth status` prints.
 
-    Returns None when the output isn't a JSON object, meaning claude
-    didn't run or printed something unexpected. The exit status can't
-    tell the two apart: claude exits 1 when signed out, and in Flatpak
-    `flatpak-spawn --host` exits non-zero with no output when claude
-    isn't on the host's PATH.
+    Returns None when the output isn't a JSON object with a boolean
+    `loggedIn`, meaning claude didn't run or printed something else.
+    The exit status can't tell the two apart: claude exits 1 when signed
+    out, and in Flatpak `flatpak-spawn --host` exits 1 with no output
+    when claude isn't on the host's PATH. Running `version_argv` can.
     """
     try:
         data = json.loads(output)
     except json.JSONDecodeError:
         return None
-    if not isinstance(data, dict):
+    if not isinstance(data, dict) or not isinstance(data.get("loggedIn"), bool):
         return None
     return AuthStatus(
-        logged_in=bool(data.get("loggedIn", False)),
+        logged_in=data["loggedIn"],
         method=data.get("authMethod"),
         subscription=data.get("subscriptionType"),
     )

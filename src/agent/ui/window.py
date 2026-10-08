@@ -58,7 +58,10 @@ class AgentWindow(Adw.ApplicationWindow):
         # The exit status is ignored: claude exits 1 when signed out.
         auth = claude_cli.parse_auth_status(output)
         if auth is None:
-            page = "missing"
+            # No status to read. If claude runs at all, offer to sign in.
+            argv = hostspawn.host_argv(claude_cli.version_argv(claude))
+            status, _output = await run_capture(argv)
+            page = "signed-out" if status == 0 else "missing"
         elif auth.logged_in:
             page = "ready"
         else:

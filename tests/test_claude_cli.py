@@ -75,22 +75,35 @@ def test_native_missing(home):
 
 # parse_auth_status
 
-# Keys as printed by Claude Code 2.1.295 when signed in; values made up.
+# Claude Code 2.1.295 prints these on stdout, indented by 2, and nothing
+# on stderr. Signed in it exits 0; keys as printed, values made up.
 SIGNED_IN = {
     "loggedIn": True,
     "authMethod": "claude.ai",
     "apiProvider": "firstParty",
+    "analyticsDisabled": False,
+    "projectsDirectory": "/home/user/.claude/projects",
+    "configDirectory": "/home/user/.claude",
     "email": "user@example.com",
+    "orgId": "00000000-0000-0000-0000-000000000000",
+    "orgName": "Example",
     "subscriptionType": "max",
 }
 
-# Not recorded: shaped from the CLI reference, which says the command
-# prints JSON, exits 1 when signed out, and lists "none" as an authMethod.
-SIGNED_OUT = {"loggedIn": False, "authMethod": "none", "apiProvider": "firstParty"}
+# Signed out it exits 1. Recorded with HOME and CLAUDE_CONFIG_DIR pointing
+# at an empty directory; only the paths are changed.
+SIGNED_OUT = {
+    "loggedIn": False,
+    "authMethod": "none",
+    "apiProvider": "firstParty",
+    "analyticsDisabled": False,
+    "projectsDirectory": "/home/user/.claude/projects",
+    "configDirectory": "/home/user/.claude",
+}
 
 
 def test_auth_signed_in():
-    status = parse_auth_status(json.dumps(SIGNED_IN))
+    status = parse_auth_status(json.dumps(SIGNED_IN, indent=2) + "\n")
     assert status is not None
     assert status.logged_in
     assert status.method == "claude.ai"
@@ -98,18 +111,21 @@ def test_auth_signed_in():
 
 
 def test_auth_signed_out():
-    status = parse_auth_status(json.dumps(SIGNED_OUT))
+    status = parse_auth_status(json.dumps(SIGNED_OUT, indent=2) + "\n")
     assert status is not None
     assert not status.logged_in
+    assert status.method == "none"
 
 
 @pytest.mark.parametrize(
     "output",
     [
         "",  # flatpak-spawn --host when claude isn't on the host's PATH
-        "not json\n",
+        "Not logged in. Run claude auth login to authenticate.\n",  # --text
         "[]",
         "null",
+        '{"authMethod": "none"}',
+        '{"loggedIn": "false"}',
     ],
 )
 def test_auth_no_status(output):
