@@ -14,9 +14,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from agent.core import APP_ID
 from agent.core import events as ev
-
-_APP_ID = "io.github.orkwitzel.Agent"
 
 
 def database_path(data_dir: str | Path) -> Path:
@@ -25,7 +24,7 @@ def database_path(data_dir: str | Path) -> Path:
     The caller passes `GLib.get_user_data_dir()`; it is a parameter because
     GLib caches that value, so tests can't redirect it with `XDG_DATA_HOME`.
     """
-    directory = Path(data_dir) / _APP_ID
+    directory = Path(data_dir) / APP_ID
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     return directory / "agent.db"
 
