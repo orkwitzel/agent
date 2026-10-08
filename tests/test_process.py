@@ -31,15 +31,39 @@ async def collect(events):
     return [event async for event in events]
 
 
+# How long a test waits on a process. A hang fails the test with
+# TimeoutError instead of blocking the run.
+TIMEOUT = 10
+
+
 async def turn(proc):
-    """Iterate events() up to and including TurnCompleted."""
-    seen = []
-    async with contextlib.aclosing(proc.events()) as events:
-        async for event in events:
-            seen.append(event)
-            if isinstance(event, TurnCompleted):
-                break
-    return seen
+    """Iterate events() up to and including TurnCompleted, within TIMEOUT."""
+
+    async def read():
+        seen = []
+        async with contextlib.aclosing(proc.events()) as events:
+            async for event in events:
+                seen.append(event)
+                if isinstance(event, TurnCompleted):
+                    break
+        return seen
+
+    return await asyncio.wait_for(read(), TIMEOUT)
+
+
+async def one_turn(proc):
+    """Start `proc`, send one message, read the turn and close.
+
+    Returns (events, exit status). Each step is bounded by TIMEOUT, and
+    the process is killed on the way out, whatever happened.
+    """
+    proc.start()
+    try:
+        await proc.send_user_message("hello")
+        seen = await turn(proc)
+        return seen, await asyncio.wait_for(proc.close(), TIMEOUT)
+    finally:
+        proc.kill()
 
 
 def alive(pid):
@@ -55,19 +79,7 @@ def test_turn_with_auto_allow(tmp_path):
     record = tmp_path / "stdin.jsonl"
     argv = [sys.executable, str(FAKE_CLAUDE), str(FIXTURES / "simple_turn.jsonl"), str(record)]
 
-    async def scenario():
-        proc = AgentProcess(argv)
-        proc.start()
-        await proc.send_user_message("what does the README say?")
-        seen = []
-        async for event in proc.events():
-            seen.append(event)
-            if isinstance(event, TurnCompleted):
-                break
-        status = await proc.close()
-        return seen, status
-
-    seen, status = run(scenario())
+    seen, status = run(one_turn(AgentProcess(argv)))
     assert status == 0
     assert any(isinstance(e, PermissionRequest) for e in seen)
     assert isinstance(seen[-1], TurnCompleted)
@@ -102,8 +114,8 @@ def test_events_task_can_be_cancelled():
             gc.collect()
             # Only that read was cancelled; the process is still usable.
             await proc.send_user_message("hello")
-            seen = await asyncio.wait_for(turn(proc), 5)
-            status = await asyncio.wait_for(proc.close(), 5)
+            seen = await turn(proc)
+            status = await asyncio.wait_for(proc.close(), TIMEOUT)
             return cancelled, seen, status
         finally:
             proc.kill()
@@ -136,7 +148,7 @@ def test_cancelling_twice_still_waits_for_the_read():
             gc.collect()
             # The cancelled read has ended, so a new one can start on the stream.
             await proc.send_user_message("hello")
-            await asyncio.wait_for(turn(proc), 5)
+            await turn(proc)
             return cancelled
         finally:
             proc.kill()
