@@ -20,6 +20,7 @@ def test_flatpak_runs_on_host():
 
 def test_scope_wraps_inside_flatpak_spawn():
     unit = scope_unit_name(7, "abc")
+    assert unit == "app-io.github.orkwitzel.Agent-thread7-abc.scope"
     argv = host_argv(["claude"], scope_unit=unit, flatpak=True)
     assert argv[:3] == ["flatpak-spawn", "--host", "--watch-bus"]
     assert argv[3:6] == ["systemd-run", "--user", "--scope"]
