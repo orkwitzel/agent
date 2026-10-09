@@ -1,12 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-import asyncio
 import json
 import shlex
 
 import pytest
 
-from agent.core.claude_cli import check_claude, find_claude, parse_auth_status
-from agent.core.process import install_glib_event_loop
+from agent.core.claude_cli import ClaudeStatus, check_claude, find_claude, parse_auth_status
+from conftest import run
 
 
 def make_executable(path):
@@ -138,15 +137,6 @@ def test_auth_no_status(output):
 # check_claude
 
 
-def run(coro):
-    install_glib_event_loop()
-    loop = asyncio.new_event_loop()
-    try:
-        return loop.run_until_complete(coro)
-    finally:
-        loop.close()
-
-
 def stub_claude(tmp_path, auth_output="", auth_exit=0, version_exit=0):
     """A claude that prints `auth_output` for `auth status` and exits with
     `version_exit` for `--version`. Only shell builtins, so PATH can be empty."""
@@ -196,3 +186,28 @@ def test_check_claude_gone_before_version(tmp_path):
     script.write_text('#!/bin/sh\nrm -- "$0"\nexit 1\n')
     script.chmod(0o755)
     assert run(check_claude(configured_path=str(script), flatpak=False)) == "missing"
+
+
+# ClaudeStatus
+
+
+def test_status_follows_check(tmp_path):
+    claude = stub_claude(tmp_path, json.dumps(SIGNED_IN, indent=2) + "\n")
+    status = ClaudeStatus()
+    seen = []
+    status.connect("notify::state", lambda obj, _pspec: seen.append(obj.props.state))
+    assert status.props.state == "checking"
+
+    run(status.check(configured_path=claude))
+    assert seen == ["checking", "ready"]
+
+
+def test_status_shows_checking_again(tmp_path):
+    claude = stub_claude(tmp_path, json.dumps(SIGNED_OUT, indent=2) + "\n", auth_exit=1)
+    status = ClaudeStatus()
+    run(status.check(configured_path=claude))
+    seen = []
+    status.connect("notify::state", lambda obj, _pspec: seen.append(obj.props.state))
+
+    run(status.check(configured_path=claude))
+    assert seen == ["checking", "signed-out"]

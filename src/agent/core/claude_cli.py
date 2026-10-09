@@ -13,7 +13,7 @@ import shutil
 from pathlib import Path
 from typing import Literal
 
-from gi.repository import GLib
+from gi.repository import GLib, GObject
 from pydantic import Field, ValidationError
 
 from agent.core import hostspawn
@@ -115,3 +115,30 @@ async def check_claude(*, configured_path: str = "", flatpak: bool | None = None
     except GLib.Error:  # Couldn't spawn it.
         return "missing"
     return "ready" if auth.logged_in else "signed-out"
+
+
+class ClaudeStatus(GObject.Object):
+    """Whether claude can be used, as a property the UI binds to.
+
+    `state` is "checking" while a check runs, then a `ClaudeState`.
+    """
+
+    __gtype_name__ = "AgentClaudeStatus"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._state: Literal["checking"] | ClaudeState = "checking"
+
+    @GObject.Property(type=str, flags=GObject.ParamFlags.READABLE)
+    def state(self) -> str:
+        """ "checking", or the outcome of the last check."""
+        return self._state
+
+    async def check(self, *, configured_path: str) -> None:
+        """Check claude again; `state` follows."""
+        self._set_state("checking")
+        self._set_state(await check_claude(configured_path=configured_path))
+
+    def _set_state(self, state: Literal["checking"] | ClaudeState) -> None:
+        self._state = state
+        self.notify("state")

@@ -65,6 +65,16 @@ claude -p --input-format stream-json --output-format stream-json \
 - **Layering:** `agent.core` (providers, events, store, process helpers)
   never imports GTK, so it is testable headless and future providers plug
   into the same neutral events.
+- **State lives in `agent.core`, widgets bind to it.** App state is
+  `GObject.Object` subclasses with properties, and `Gio.ListStore` lists,
+  wrapping pydantic data rather than copying it. Widgets bind to them
+  (Blueprint `bind`, `bind_property`, list views over the list models) and
+  forward user actions to core methods, so they hold no logic of their own
+  and the logic is tested without a display. The application owns that
+  state and hands it to its windows.
+- **Planned extension points:** providers (Codex, ACP agents) are the only
+  one. An interface (`typing.Protocol`) may be defined ahead of a second
+  implementation only for an extension point listed here.
 - **Storage:** Agent's own SQLite database of provider-neutral events. Each
   thread keeps Claude's `session_id` for `--resume`. Claude's session files
   are left to Claude.

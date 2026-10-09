@@ -70,7 +70,42 @@ template $AgentWindow: Adw.ApplicationWindow {
             child: Gtk.ScrolledWindow {
               hscrollbar-policy: never;
 
-              child: Gtk.ListBox project_list {
+              child: Gtk.ListView project_list {
+                factory: Gtk.BuilderListItemFactory {
+                  template Gtk.ListItem {
+                    activatable: false;
+
+                    child: Gtk.Box {
+                      spacing: 12;
+
+                      Gtk.Image {
+                        icon-name: "folder-symbolic";
+                      }
+
+                      Gtk.Box {
+                        orientation: vertical;
+
+                        Gtk.Label {
+                          xalign: 0;
+                          ellipsize: end;
+                          label: bind template.item as <$AgentProjectItem>.name;
+                        }
+
+                        Gtk.Label {
+                          xalign: 0;
+                          ellipsize: middle;
+                          label: bind template.item as <$AgentProjectItem>.path;
+
+                          styles [
+                            "caption",
+                            "dim-label",
+                          ]
+                        }
+                      }
+                    };
+                  }
+                };
+
                 styles [
                   "navigation-sidebar",
                 ]

@@ -14,22 +14,8 @@ from pathlib import Path
 import pytest
 
 from agent.core.events import PermissionRequest, TurnCompleted, Unrecognized
-from agent.core.process import (
-    STDERR_TAIL_BYTES,
-    AgentProcess,
-    install_glib_event_loop,
-    run_capture,
-)
-from conftest import FAKE_CLAUDE, FIXTURES
-
-
-def run(coro):
-    install_glib_event_loop()
-    loop = asyncio.new_event_loop()
-    try:
-        return loop.run_until_complete(coro)
-    finally:
-        loop.close()
+from agent.core.process import STDERR_TAIL_BYTES, AgentProcess, run_capture
+from conftest import FAKE_CLAUDE, FIXTURES, run
 
 
 async def collect(events):

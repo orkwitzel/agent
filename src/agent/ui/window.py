@@ -1,12 +1,14 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-import asyncio
 from gettext import gettext as _
 
-from gi.repository import Adw, Gio, GLib, Gtk
+from gi.repository import Adw, Gio, GLib, GObject, Gtk
 
 from agent.core import claude_cli
-from agent.core.store import Project, Store, database_path
+from agent.core.claude_cli import ClaudeStatus
+from agent.core.projects import ProjectList
+from agent.core.tasks import TaskSet
+from agent.ui.actions import add_action
 
 
 @Gtk.Template(resource_path="/io/github/orkwitzel/Agent/ui/window.ui")
@@ -19,84 +21,69 @@ class AgentWindow(Adw.ApplicationWindow):
     content_stack = Gtk.Template.Child()
     download_link = Gtk.Template.Child()
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.settings = self.get_application().settings
-        self.store = Store(database_path(GLib.get_user_data_dir()))
-        self._tasks: set[asyncio.Task] = set()
+    def __init__(
+        self,
+        *,
+        application: Adw.Application,
+        settings: Gio.Settings,
+        projects: ProjectList,
+        claude: ClaudeStatus,
+        tasks: TaskSet,
+    ):
+        super().__init__(application=application)
+        self._settings = settings
+        self._projects = projects
+        self._claude = claude
+        self._tasks = tasks
 
         self.download_link.set_uri(claude_cli.DOWNLOAD_URL)
-        self._restore_size()
-        self._add_window_action("add-project", self._on_add_project)
-        self._add_window_action("check-claude", lambda *_: self._spawn(self._check_claude()))
-
-        self._reload_projects()
-        self._spawn(self._check_claude())
-
-    # Claude detection
-
-    async def _check_claude(self):
-        self.content_stack.set_visible_child_name("checking")
-        state = await claude_cli.check_claude(
-            configured_path=self.settings.get_string("claude-path")
+        self.project_list.set_model(Gtk.NoSelection.new(projects.items))
+        projects.items.bind_property(
+            "n-items",
+            self.sidebar_stack,
+            "visible-child-name",
+            GObject.BindingFlags.SYNC_CREATE,
+            lambda _binding, n_items: "projects" if n_items else "empty",
         )
         # The stack's pages are named after the states.
-        self.content_stack.set_visible_child_name(state)
+        claude.bind_property(
+            "state", self.content_stack, "visible-child-name", GObject.BindingFlags.SYNC_CREATE
+        )
 
-    # Projects
+        self._restore_size()
+        add_action(self, "add-project", self._add_project)
+        add_action(self, "check-claude", self._check_claude)
+        self._check_claude()
 
-    def _on_add_project(self, *_args):
+    def _check_claude(self):
+        configured_path = self._settings.get_string("claude-path")
+        self._tasks.spawn(self._claude.check(configured_path=configured_path))
+
+    def _add_project(self):
+        self._tasks.spawn(self._pick_project())
+
+    async def _pick_project(self):
         dialog = Gtk.FileDialog(title=_("Add Project"), modal=True)
-        self._spawn(self._pick_project(dialog))
-
-    async def _pick_project(self, dialog: Gtk.FileDialog):
         try:
             folder = await dialog.select_folder(self, None)
         except GLib.Error:
             return  # Cancelled.
         path = folder.get_path()
         if path:
-            self.store.add_project(path)
-            self._reload_projects()
-
-    def _reload_projects(self):
-        self.project_list.remove_all()
-        projects = self.store.projects()
-        for project in projects:
-            self.project_list.append(self._project_row(project))
-        self.sidebar_stack.set_visible_child_name("projects" if projects else "empty")
-
-    def _project_row(self, project: Project) -> Gtk.Widget:
-        row = Adw.ActionRow(title=project.name, subtitle=project.path)
-        row.add_prefix(Gtk.Image(icon_name="folder-symbolic"))
-        return row
+            self._projects.add(path)
 
     # Window state
 
     def _restore_size(self):
         self.set_default_size(
-            self.settings.get_int("window-width"), self.settings.get_int("window-height")
+            self._settings.get_int("window-width"), self._settings.get_int("window-height")
         )
-        if self.settings.get_boolean("window-maximized"):
+        if self._settings.get_boolean("window-maximized"):
             self.maximize()
 
     def do_close_request(self):
         width, height = self.get_default_size()
-        self.settings.set_int("window-width", width)
-        self.settings.set_int("window-height", height)
-        self.settings.set_boolean("window-maximized", self.is_maximized())
-        self.store.close()
+        self._settings.set_int("window-width", width)
+        self._settings.set_int("window-height", height)
+        self._settings.set_boolean("window-maximized", self.is_maximized())
         return False
-
-    # Helpers
-
-    def _spawn(self, coro):
-        # Keep a strong reference: asyncio only holds tasks weakly.
-        task = asyncio.ensure_future(coro)
-        self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
-
-    def _add_window_action(self, name, callback):
-        action = Gio.SimpleAction.new(name, None)
-        action.connect("activate", callback)
-        self.add_action(action)
