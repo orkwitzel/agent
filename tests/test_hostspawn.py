@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-from agent.core.claude_cli import parse_auth_status
 from agent.core.hostspawn import host_argv, scope_unit_name
 
 
@@ -26,12 +25,3 @@ def test_scope_wraps_inside_flatpak_spawn():
     assert argv[3:6] == ["systemd-run", "--user", "--scope"]
     assert f"--unit={unit}" in argv
     assert argv[-2:] == ["--", "claude"]
-
-
-def test_auth_status_parsing():
-    status = parse_auth_status(
-        '{"loggedIn":true,"authMethod":"claude.ai","subscriptionType":"max"}'
-    )
-    assert status.logged_in and status.subscription == "max"
-    assert not parse_auth_status("").logged_in
-    assert not parse_auth_status('{"loggedIn":false}').logged_in

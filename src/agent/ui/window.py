@@ -5,9 +5,15 @@ from gettext import gettext as _
 
 from gi.repository import Adw, Gio, GLib, Gtk
 
-from agent.core import claude_cli, hostspawn
-from agent.core.process import run_capture
+from agent.core import claude_cli
+from agent.core.claude_cli import ClaudeState
 from agent.core.store import Project, Store, database_path
+
+_CLAUDE_PAGES = {
+    ClaudeState.READY: "ready",
+    ClaudeState.SIGNED_OUT: "signed-out",
+    ClaudeState.MISSING: "missing",
+}
 
 
 @Gtk.Template(resource_path="/io/github/orkwitzel/Agent/ui/window.ui")
@@ -38,18 +44,8 @@ class AgentWindow(Adw.ApplicationWindow):
 
     async def _check_claude(self):
         self.content_stack.set_visible_child_name("checking")
-        claude = claude_cli.find_claude(self.settings.get_string("claude-path"))
-        if claude is None:
-            self.content_stack.set_visible_child_name("missing")
-            return
-        argv = hostspawn.host_argv(claude_cli.auth_status_argv(claude))
-        try:
-            _status, output = await run_capture(argv)
-        except GLib.Error:
-            self.content_stack.set_visible_child_name("missing")
-            return
-        auth = claude_cli.parse_auth_status(output)
-        self.content_stack.set_visible_child_name("ready" if auth.logged_in else "signed-out")
+        state = await claude_cli.check_claude(self.settings.get_string("claude-path"))
+        self.content_stack.set_visible_child_name(_CLAUDE_PAGES[state])
 
     # Projects
 
