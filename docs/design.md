@@ -52,6 +52,10 @@ claude -p --input-format stream-json --output-format stream-json \
 - **Meson** build, **Blueprint** UI files, **gettext** from day one.
 - **Async:** Gio async APIs awaited through PyGObject's asyncio integration on
   the GLib main loop. One thread. `asyncio.to_thread` for CPU-heavy work.
+  `agent.core.process` awaits Gio calls through their callback form, each
+  with its own `Gio.Cancellable`, because before PyGObject 3.56.3 cancelling
+  a task that awaits a Gio call directly raises `TypeError` and never stops
+  the call.
 - **Layering:** `agent.core` (providers, events, store, process helpers)
   never imports GTK, so it is testable headless and future providers plug
   into the same neutral events.
