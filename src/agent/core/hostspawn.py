@@ -12,6 +12,8 @@ from __future__ import annotations
 import os
 import re
 
+from agent.core import APP_ID
+
 FLATPAK_INFO = "/.flatpak-info"
 
 
@@ -21,7 +23,7 @@ def in_flatpak() -> bool:
 
 def scope_unit_name(thread_id: int, nonce: str) -> str:
     safe = re.sub(r"[^A-Za-z0-9_.-]", "_", nonce)
-    return f"app-io.github.orkwitzel.Agent-thread{thread_id}-{safe}.scope"
+    return f"app-{APP_ID}-thread{thread_id}-{safe}.scope"
 
 
 def host_argv(

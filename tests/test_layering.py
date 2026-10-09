@@ -19,6 +19,6 @@ def imported_names(path):
 
 
 def test_core_does_not_import_ui():
-    for path in CORE.glob("*.py"):
+    for path in CORE.rglob("*.py"):
         bad = FORBIDDEN.intersection(imported_names(path))
-        assert not bad, f"{path.name} imports {bad}"
+        assert not bad, f"{path.relative_to(CORE)} imports {bad}"
