@@ -41,13 +41,13 @@ def test_session_started_fields():
     started = parse_fixture("simple_turn.jsonl")[0]
     assert started.session_id == "11111111-2222-3333-4444-555555555555"
     assert started.model == "claude-sonnet-5-5"
-    assert started.slash_commands == ["compact", "review"]
+    assert started.slash_commands == ("compact", "review")
     assert started.agent_version == "2.1.293"
 
 
 def test_tool_result_flattens_text_blocks():
     result = parse_fixture("simple_turn.jsonl")[4]
-    assert result == ToolResult("toolu_01", "# Project\nHello", is_error=False)
+    assert result == ToolResult(tool_call_id="toolu_01", content="# Project\nHello", is_error=False)
 
 
 def test_turn_completed_usage():
@@ -66,7 +66,22 @@ def test_blank_and_garbage_lines():
 
 def test_unknown_message_type_is_kept():
     [event] = claude_stream.parse_line('{"type":"stream_event","x":1}')
-    assert event == Unrecognized({"type": "stream_event", "x": 1})
+    assert event == Unrecognized(raw={"type": "stream_event", "x": 1})
+
+
+def test_known_message_with_missing_fields_is_kept():
+    # Never filled in with defaults: a protocol change must stay visible.
+    message = {"type": "result", "subtype": "success", "is_error": False}
+    assert claude_stream.parse_line(json.dumps(message)) == [Unrecognized(raw=message)]
+
+
+def test_unknown_content_block_is_kept():
+    block = {"type": "server_tool_use", "id": "srvtoolu_1"}
+    message = {"type": "assistant", "message": {"content": [{"type": "text", "text": "Hi"}, block]}}
+    assert claude_stream.parse_line(json.dumps(message)) == [
+        AssistantText(text="Hi"),
+        Unrecognized(raw=block),
+    ]
 
 
 def test_control_reply():
@@ -80,7 +95,9 @@ def test_control_reply():
             },
         }
     )
-    assert claude_stream.parse_line(line) == [ControlReply("agent-1", True, {"percentage": 12})]
+    assert claude_stream.parse_line(line) == [
+        ControlReply(request_id="agent-1", ok=True, payload={"percentage": 12})
+    ]
 
 
 def test_unknown_control_request_is_kept():
@@ -107,7 +124,9 @@ def test_unsupported_control_request_ignores_other_messages():
 
 
 def test_allow_tool_echoes_input():
-    request = PermissionRequest("cli-req-1", "Read", {"file_path": "/x"}, "toolu_01")
+    request = PermissionRequest(
+        request_id="cli-req-1", tool_name="Read", input={"file_path": "/x"}, tool_call_id="toolu_01"
+    )
     assert claude_stream.allow_tool(request) == {
         "type": "control_response",
         "response": {
@@ -119,7 +138,7 @@ def test_allow_tool_echoes_input():
 
 
 def test_user_message_with_image():
-    msg = claude_stream.user_message("look", [("image/png", "AAAA")])
+    msg = claude_stream.user_message("look", images=[("image/png", "AAAA")])
     assert msg["message"]["content"][1] == {
         "type": "image",
         "source": {"type": "base64", "media_type": "image/png", "data": "AAAA"},

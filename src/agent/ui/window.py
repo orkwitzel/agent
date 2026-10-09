@@ -6,14 +6,7 @@ from gettext import gettext as _
 from gi.repository import Adw, Gio, GLib, Gtk
 
 from agent.core import claude_cli
-from agent.core.claude_cli import ClaudeState
 from agent.core.store import Project, Store, database_path
-
-_CLAUDE_PAGES = {
-    ClaudeState.READY: "ready",
-    ClaudeState.SIGNED_OUT: "signed-out",
-    ClaudeState.MISSING: "missing",
-}
 
 
 @Gtk.Template(resource_path="/io/github/orkwitzel/Agent/ui/window.ui")
@@ -44,8 +37,11 @@ class AgentWindow(Adw.ApplicationWindow):
 
     async def _check_claude(self):
         self.content_stack.set_visible_child_name("checking")
-        state = await claude_cli.check_claude(self.settings.get_string("claude-path"))
-        self.content_stack.set_visible_child_name(_CLAUDE_PAGES[state])
+        state = await claude_cli.check_claude(
+            configured_path=self.settings.get_string("claude-path")
+        )
+        # The stack's pages are named after the states.
+        self.content_stack.set_visible_child_name(state)
 
     # Projects
 

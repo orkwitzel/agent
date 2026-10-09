@@ -9,7 +9,7 @@ reasons are in `docs/design.md`; read it before changing architecture.
 
 ```sh
 python3 -m venv --system-site-packages .venv
-.venv/bin/pip install meson ninja ruff pytest markdown-it-py
+.venv/bin/pip install meson ninja ruff pytest markdown-it-py pydantic
 
 .venv/bin/pytest                      # unit + process tests (no real claude needed)
 .venv/bin/ruff check . && .venv/bin/ruff format --check .

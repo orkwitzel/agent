@@ -16,7 +16,10 @@ Message shapes follow the control protocol defined in
 from __future__ import annotations
 
 import json
-from typing import Any
+from collections.abc import Sequence
+from typing import Literal
+
+from pydantic import Field, JsonValue, TypeAdapter, ValidationError
 
 from agent.core.events import (
     AssistantText,
@@ -31,6 +34,9 @@ from agent.core.events import (
     TurnCompleted,
     Unrecognized,
 )
+from agent.core.model import WireModel
+
+_JSON: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
 
 
 def claude_argv(
@@ -39,6 +45,7 @@ def claude_argv(
     model: str | None = None,
     resume_session_id: str | None = None,
 ) -> list[str]:
+    """The command line for one long-lived, headless claude."""
     argv = [
         claude_path,
         "-p",
@@ -60,159 +67,241 @@ def claude_argv(
 # Parsing (claude -> us)
 
 
-def parse_line(line: str | bytes) -> list[Event]:
+class _SystemInit(WireModel):
+    session_id: str
+    model: str
+    cwd: str
+    tools: list[str]
+    slash_commands: list[str]
+    api_key_source: str = Field(alias="apiKeySource")
+    claude_code_version: str
+
+
+class _AssistantContent(WireModel):
+    content: list[dict[str, JsonValue]]
+
+
+class _AssistantMessage(WireModel):
+    message: _AssistantContent
+
+
+class _UserContent(WireModel):
+    content: str | list[dict[str, JsonValue]]
+
+
+class _UserMessage(WireModel):
+    message: _UserContent
+
+
+class _TextBlock(WireModel):
+    text: str
+
+
+class _ThinkingBlock(WireModel):
+    thinking: str
+
+
+class _ToolUseBlock(WireModel):
+    id: str
+    name: str
+    input: dict[str, JsonValue]
+
+
+class _ToolResultBlock(WireModel):
+    tool_use_id: str
+    content: str | list[dict[str, JsonValue]] | None = None
+    is_error: bool = False
+
+
+class _Usage(WireModel):
+    input_tokens: int
+    output_tokens: int
+    cache_read_input_tokens: int
+    cache_creation_input_tokens: int
+
+
+class _Result(WireModel):
+    session_id: str
+    is_error: bool
+    duration_ms: int
+    usage: _Usage
+    result: str | None = None
+
+
+class _ControlRequest(WireModel):
+    request_id: str
+    request: dict[str, JsonValue]
+
+
+class _CanUseTool(WireModel):
+    tool_name: str
+    input: dict[str, JsonValue]
+    tool_use_id: str | None = None
+
+
+class _ControlResponseBody(WireModel):
+    subtype: Literal["success", "error"]
+    request_id: str
+    response: dict[str, JsonValue] = Field(default_factory=dict)
+    error: str | None = None
+
+
+class _ControlResponse(WireModel):
+    response: _ControlResponseBody
+
+
+def parse_line(line: str) -> list[Event]:
     """Parse one stdout line. Blank lines yield nothing."""
-    if isinstance(line, bytes):
-        line = line.decode("utf-8", errors="replace")
     line = line.strip()
     if not line:
         return []
     try:
-        msg = json.loads(line)
-    except json.JSONDecodeError:
-        return [Unrecognized({"unparsable": line})]
-    if not isinstance(msg, dict):
-        return [Unrecognized({"value": msg})]
-    return parse_message(msg)
+        message = _JSON.validate_json(line)
+    except ValidationError:
+        return [Unrecognized(raw={"unparsable": line})]
+    if not isinstance(message, dict):
+        return [Unrecognized(raw={"value": message})]
+    return _parse_message(message)
 
 
-def parse_message(msg: dict[str, Any]) -> list[Event]:
-    kind = msg.get("type")
-    if kind == "system" and msg.get("subtype") == "init":
-        return [_session_started(msg)]
-    if kind == "assistant":
-        return _assistant_blocks(msg)
-    if kind == "user":
-        return _tool_results(msg)
-    if kind == "result":
-        return [_turn_completed(msg)]
-    if kind == "control_request":
-        return _control_request(msg)
-    if kind == "control_response":
-        return [_control_reply(msg)]
-    return [Unrecognized(msg)]
+def _parse_message(message: dict[str, JsonValue]) -> list[Event]:
+    """Turn one message into events.
+
+    A message we don't handle, or whose shape doesn't match what we expect,
+    becomes `Unrecognized` as a whole.
+    """
+    try:
+        match message.get("type"):
+            case "system" if message.get("subtype") == "init":
+                return [_session_started(_SystemInit.model_validate(message))]
+            case "assistant":
+                content = _AssistantMessage.model_validate(message).message.content
+                return [_assistant_block(block) for block in content]
+            case "user":
+                return _tool_results(_UserMessage.model_validate(message).message.content)
+            case "result":
+                return [_turn_completed(_Result.model_validate(message))]
+            case "control_request":
+                return [_control_request(message)]
+            case "control_response":
+                return [_control_reply(_ControlResponse.model_validate(message).response)]
+            case _:
+                return [Unrecognized(raw=message)]
+    except ValidationError:
+        return [Unrecognized(raw=message)]
 
 
-def _session_started(msg: dict[str, Any]) -> SessionStarted:
+def _session_started(init: _SystemInit) -> SessionStarted:
     return SessionStarted(
-        session_id=msg.get("session_id", ""),
-        model=msg.get("model"),
-        cwd=msg.get("cwd"),
-        tools=list(msg.get("tools") or []),
-        slash_commands=list(msg.get("slash_commands") or []),
-        auth_source=msg.get("apiKeySource"),
-        agent_version=msg.get("claude_code_version"),
+        session_id=init.session_id,
+        model=init.model,
+        cwd=init.cwd,
+        tools=tuple(init.tools),
+        slash_commands=tuple(init.slash_commands),
+        auth_source=init.api_key_source,
+        agent_version=init.claude_code_version,
     )
 
 
-def _assistant_blocks(msg: dict[str, Any]) -> list[Event]:
-    events: list[Event] = []
-    for block in (msg.get("message") or {}).get("content") or []:
-        btype = block.get("type")
-        if btype == "text":
-            events.append(AssistantText(block.get("text", "")))
-        elif btype == "thinking":
-            events.append(AssistantThinking(block.get("thinking", "")))
-        elif btype == "tool_use":
-            events.append(
-                ToolCall(
-                    tool_call_id=block.get("id", ""),
-                    name=block.get("name", ""),
-                    input=block.get("input") or {},
-                )
-            )
-        else:
-            events.append(Unrecognized(block))
-    return events
+def _assistant_block(block: dict[str, JsonValue]) -> Event:
+    match block.get("type"):
+        case "text":
+            return AssistantText(text=_TextBlock.model_validate(block).text)
+        case "thinking":
+            return AssistantThinking(text=_ThinkingBlock.model_validate(block).thinking)
+        case "tool_use":
+            tool_use = _ToolUseBlock.model_validate(block)
+            return ToolCall(tool_call_id=tool_use.id, name=tool_use.name, input=tool_use.input)
+        case _:
+            return Unrecognized(raw=block)
 
 
-def _tool_results(msg: dict[str, Any]) -> list[Event]:
-    content = (msg.get("message") or {}).get("content")
-    if not isinstance(content, list):
+def _tool_results(content: str | list[dict[str, JsonValue]]) -> list[Event]:
+    if isinstance(content, str):
         # A plain user echo, not a tool result.
         return []
-    events: list[Event] = []
-    for block in content:
-        if block.get("type") != "tool_result":
-            continue
-        events.append(
-            ToolResult(
-                tool_call_id=block.get("tool_use_id", ""),
-                content=_flatten_content(block.get("content")),
-                is_error=bool(block.get("is_error", False)),
-            )
+    results = [
+        _ToolResultBlock.model_validate(block)
+        for block in content
+        if block.get("type") == "tool_result"
+    ]
+    return [
+        ToolResult(
+            tool_call_id=result.tool_use_id,
+            content=_flatten_content(result.content),
+            is_error=result.is_error,
         )
-    return events
+        for result in results
+    ]
 
 
-def _flatten_content(content: Any) -> str:
+def _flatten_content(content: str | list[dict[str, JsonValue]] | None) -> str:
     if content is None:
         return ""
     if isinstance(content, str):
         return content
-    if isinstance(content, list):
-        parts = []
-        for part in content:
-            if isinstance(part, dict) and part.get("type") == "text":
-                parts.append(part.get("text", ""))
-            elif isinstance(part, dict) and part.get("type") == "image":
+    parts: list[str] = []
+    for part in content:
+        match part:
+            case {"type": "text", "text": str(text)}:
+                parts.append(text)
+            case {"type": "image"}:
                 parts.append("[image]")
-        return "\n".join(parts)
-    return json.dumps(content)
+            case _:
+                pass
+    return "\n".join(parts)
 
 
-def _turn_completed(msg: dict[str, Any]) -> TurnCompleted:
-    usage = msg.get("usage") or {}
+def _turn_completed(result: _Result) -> TurnCompleted:
     return TurnCompleted(
-        session_id=msg.get("session_id"),
-        is_error=bool(msg.get("is_error", False)),
-        duration_ms=msg.get("duration_ms"),
+        session_id=result.session_id,
+        is_error=result.is_error,
+        duration_ms=result.duration_ms,
         usage=TokenUsage(
-            input_tokens=usage.get("input_tokens", 0),
-            output_tokens=usage.get("output_tokens", 0),
-            cache_read_tokens=usage.get("cache_read_input_tokens", 0),
-            cache_creation_tokens=usage.get("cache_creation_input_tokens", 0),
+            input_tokens=result.usage.input_tokens,
+            output_tokens=result.usage.output_tokens,
+            cache_read_tokens=result.usage.cache_read_input_tokens,
+            cache_creation_tokens=result.usage.cache_creation_input_tokens,
         ),
-        result=msg.get("result"),
+        result=result.result,
     )
 
 
-def _control_request(msg: dict[str, Any]) -> list[Event]:
-    request = msg.get("request") or {}
-    if request.get("subtype") == "can_use_tool":
-        return [
-            PermissionRequest(
-                request_id=msg.get("request_id", ""),
-                tool_name=request.get("tool_name", ""),
-                input=request.get("input") or {},
-                tool_call_id=request.get("tool_use_id"),
-            )
-        ]
-    return [Unrecognized(msg)]
+def _control_request(message: dict[str, JsonValue]) -> Event:
+    control = _ControlRequest.model_validate(message)
+    if control.request.get("subtype") != "can_use_tool":
+        return Unrecognized(raw=message)
+    request = _CanUseTool.model_validate(control.request)
+    return PermissionRequest(
+        request_id=control.request_id,
+        tool_name=request.tool_name,
+        input=request.input,
+        tool_call_id=request.tool_use_id,
+    )
 
 
-def _control_reply(msg: dict[str, Any]) -> ControlReply:
-    response = msg.get("response") or {}
-    ok = response.get("subtype") == "success"
+def _control_reply(body: _ControlResponseBody) -> ControlReply:
+    ok = body.subtype == "success"
     return ControlReply(
-        request_id=response.get("request_id", ""),
+        request_id=body.request_id,
         ok=ok,
-        payload=response.get("response") or {},
-        error=None if ok else response.get("error"),
+        payload=body.response,
+        error=None if ok else body.error,
     )
 
 
 # Building (us -> claude)
 
 
-def encode(obj: dict[str, Any]) -> bytes:
-    return (json.dumps(obj, separators=(",", ":")) + "\n").encode("utf-8")
+def encode(message: dict[str, JsonValue]) -> bytes:
+    """One stdin line: compact JSON and a newline."""
+    return (json.dumps(message, separators=(",", ":")) + "\n").encode()
 
 
-def user_message(text: str, images: list[tuple[str, str]] | None = None) -> dict[str, Any]:
-    """A user turn. `images` is a list of (media_type, base64_data)."""
-    content: list[dict[str, Any]] = [{"type": "text", "text": text}]
-    for media_type, data in images or []:
+def user_message(text: str, *, images: Sequence[tuple[str, str]] = ()) -> dict[str, JsonValue]:
+    """A user turn. `images` holds (media_type, base64_data) pairs."""
+    content: list[JsonValue] = [{"type": "text", "text": text}]
+    for media_type, data in images:
         content.append(
             {
                 "type": "image",
@@ -226,55 +315,66 @@ def user_message(text: str, images: list[tuple[str, str]] | None = None) -> dict
     }
 
 
-def control_request(request_id: str, request: dict[str, Any]) -> dict[str, Any]:
+def control_request(request_id: str, request: dict[str, JsonValue]) -> dict[str, JsonValue]:
+    """A control request we send; claude answers with a `ControlReply`."""
     return {"type": "control_request", "request_id": request_id, "request": request}
 
 
-def interrupt(request_id: str) -> dict[str, Any]:
+def interrupt(request_id: str) -> dict[str, JsonValue]:
+    """Ask claude to stop the running turn."""
     return control_request(request_id, {"subtype": "interrupt"})
 
 
-def set_model(request_id: str, model: str | None) -> dict[str, Any]:
+def set_model(request_id: str, model: str | None) -> dict[str, JsonValue]:
+    """Switch the model for the next turns; None means claude's default."""
     return control_request(request_id, {"subtype": "set_model", "model": model})
 
 
-def get_context_usage(request_id: str) -> dict[str, Any]:
+def get_context_usage(request_id: str) -> dict[str, JsonValue]:
+    """Ask how full the context window is."""
     return control_request(request_id, {"subtype": "get_context_usage"})
 
 
-def allow_tool(request: PermissionRequest) -> dict[str, Any]:
+def allow_tool(request: PermissionRequest) -> dict[str, JsonValue]:
+    """Let the tool run with the input it asked for."""
     return _control_success(
         request.request_id, {"behavior": "allow", "updatedInput": request.input}
     )
 
 
-def deny_tool(request: PermissionRequest, message: str) -> dict[str, Any]:
+def deny_tool(request: PermissionRequest, message: str) -> dict[str, JsonValue]:
+    """Refuse the tool call; `message` tells the model why."""
     return _control_success(
         request.request_id, {"behavior": "deny", "message": message, "interrupt": False}
     )
 
 
-def unsupported_control_request(msg: dict[str, Any]) -> dict[str, Any] | None:
+def unsupported_control_request(message: dict[str, JsonValue]) -> dict[str, JsonValue] | None:
     """An error reply to a control request we don't handle.
 
     The CLI waits for a reply to every control request, so one left
-    unanswered can stall the turn. Returns None if `msg` isn't a
-    control request.
+    unanswered can stall the turn. Returns None if `message` isn't a
+    control request we could reply to.
     """
-    if msg.get("type") != "control_request":
+    if message.get("type") != "control_request":
         return None
-    subtype = (msg.get("request") or {}).get("subtype")
-    return _control_error(msg.get("request_id", ""), f"Agent does not support {subtype}")
+    try:
+        control = _ControlRequest.model_validate(message)
+    except ValidationError:
+        # Without a request id there is nothing to reply to.
+        return None
+    subtype = control.request.get("subtype")
+    return _control_error(control.request_id, f"Agent does not support {subtype}")
 
 
-def _control_success(request_id: str, response: dict[str, Any]) -> dict[str, Any]:
+def _control_success(request_id: str, response: dict[str, JsonValue]) -> dict[str, JsonValue]:
     return {
         "type": "control_response",
         "response": {"subtype": "success", "request_id": request_id, "response": response},
     }
 
 
-def _control_error(request_id: str, error: str) -> dict[str, Any]:
+def _control_error(request_id: str, error: str) -> dict[str, JsonValue]:
     return {
         "type": "control_response",
         "response": {"subtype": "error", "request_id": request_id, "error": error},

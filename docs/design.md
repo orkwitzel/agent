@@ -68,7 +68,11 @@ claude -p --input-format stream-json --output-format stream-json \
 - **Storage:** Agent's own SQLite database of provider-neutral events. Each
   thread keeps Claude's `session_id` for `--resume`. Claude's session files
   are left to Claude.
-- **Dependencies:** PyGObject and `markdown-it-py` only.
+- **Dependencies:** PyGObject, `pydantic` (2.10 or newer, Debian 13's
+  version) and `markdown-it-py`. pydantic turns the JSON we don't control
+  (claude's stream, `claude auth status`) into strict, typed objects and
+  round-trips our events through SQLite; it is packaged in Fedora and
+  Debian, and the Flatpak uses its wheels.
 
 ## UI
 

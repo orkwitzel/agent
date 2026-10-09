@@ -12,12 +12,13 @@ import contextlib
 import itertools
 import logging
 import warnings
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Sequence
 
 import gi
 
 gi.require_version("Gio", "2.0")
 from gi.repository import Gio, GLib  # noqa: E402
+from pydantic import JsonValue  # noqa: E402
 
 from agent.core import claude_stream  # noqa: E402
 from agent.core.events import Event, PermissionRequest, Unrecognized  # noqa: E402
@@ -196,7 +197,7 @@ class AgentProcess:
     def next_request_id(self) -> str:
         return f"agent-{next(self._ids)}"
 
-    async def send(self, message: dict) -> None:
+    async def send(self, message: dict[str, JsonValue]) -> None:
         """Write one message to stdin.
 
         Cancelling this mid-write can leave part of a large message on
@@ -212,10 +213,9 @@ class AgentProcess:
             cancellable=self._cancellable,
         )
 
-    async def send_user_message(
-        self, text: str, images: list[tuple[str, str]] | None = None
-    ) -> None:
-        await self.send(claude_stream.user_message(text, images))
+    async def send_user_message(self, text: str, *, images: Sequence[tuple[str, str]] = ()) -> None:
+        """Send a user turn. `images` holds (media_type, base64_data) pairs."""
+        await self.send(claude_stream.user_message(text, images=images))
 
     async def interrupt(self) -> None:
         await self.send(claude_stream.interrupt(self.next_request_id()))
