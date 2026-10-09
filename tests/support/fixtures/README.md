@@ -1,7 +1,7 @@
 # Fixtures
 
 Each `.jsonl` file is one `claude` stream-json stdout transcript, one JSON
-object per line, replayed by `tests/fake_claude.py`.
+object per line, replayed by `tests/support/fake_claude.py`.
 
 `simple_turn.jsonl` is hand-written from the shapes in
 `@anthropic-ai/claude-agent-sdk`'s `sdk.d.ts`, not recorded. Replace or

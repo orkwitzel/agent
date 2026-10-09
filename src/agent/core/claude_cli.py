@@ -65,14 +65,17 @@ def find_claude(*, configured_path: str = "", flatpak: bool | None = None) -> st
 
 
 def auth_status_argv(claude_path: str) -> list[str]:
+    """Ask claude whether the user is signed in; prints JSON."""
     return [claude_path, "auth", "status"]
 
 
 def auth_login_argv(claude_path: str) -> list[str]:
+    """Let claude sign the user in, in its own interactive flow."""
     return [claude_path, "auth", "login"]
 
 
 def version_argv(claude_path: str) -> list[str]:
+    """Print claude's version; exits 0 if claude runs at all."""
     return [claude_path, "--version"]
 
 
@@ -131,7 +134,7 @@ class ClaudeStatus(GObject.Object):
 
     @GObject.Property(type=str, flags=GObject.ParamFlags.READABLE)
     def state(self) -> str:
-        """ "checking", or the outcome of the last check."""
+        """Either "checking" or the outcome of the last check."""
         return self._state
 
     async def check(self, *, configured_path: str) -> None:

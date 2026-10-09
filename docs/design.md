@@ -58,7 +58,7 @@ claude -p --input-format stream-json --output-format stream-json \
 - **Meson** build, **Blueprint** UI files, **gettext** from day one.
 - **Async:** Gio async APIs awaited through PyGObject's asyncio integration on
   the GLib main loop. One thread. `asyncio.to_thread` for CPU-heavy work.
-  `agent.core.process` awaits Gio calls through their callback form, each
+  `agent.core.mainloop.gio_call` awaits Gio calls through their callback form, each
   with its own `Gio.Cancellable`, because before PyGObject 3.56.3 cancelling
   a task that awaits a Gio call directly raises `TypeError` and never stops
   the call.
@@ -105,8 +105,9 @@ claude -p --input-format stream-json --output-format stream-json \
 
 ## Quality and shipping
 
-- pytest on stream-json fixtures replayed by a fake `claude`, plus ruff.
-  The UI is tested by hand.
+- pytest on stream-json fixtures replayed by a fake `claude`, plus ruff
+  and basedpyright (strict), all run by `meson test` in a `-Ddev=true`
+  build. The UI is tested by hand.
 - Flatpak first: `.flatpak` bundles on GitHub Releases with an in-app
   "new version" banner, then Flathub once stable. Permissions are
   `--talk-name=org.freedesktop.Flatpak` (run claude and git on the host) and

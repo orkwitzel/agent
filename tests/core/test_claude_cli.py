@@ -1,11 +1,13 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+from __future__ import annotations
+
 import json
 import shlex
 
 import pytest
 
 from agent.core.claude_cli import ClaudeStatus, check_claude, find_claude, parse_auth_status
-from conftest import run
+from support import run
 
 
 def make_executable(path):
@@ -137,7 +139,7 @@ def test_auth_no_status(output):
 # check_claude
 
 
-def stub_claude(tmp_path, auth_output="", auth_exit=0, version_exit=0):
+def stub_claude(tmp_path, *, auth_output="", auth_exit=0, version_exit=0):
     """A claude that prints `auth_output` for `auth status` and exits with
     `version_exit` for `--version`. Only shell builtins, so PATH can be empty."""
     script = tmp_path / "claude"
@@ -151,13 +153,13 @@ def stub_claude(tmp_path, auth_output="", auth_exit=0, version_exit=0):
 
 
 def test_check_signed_in(tmp_path):
-    claude = stub_claude(tmp_path, json.dumps(SIGNED_IN, indent=2) + "\n")
+    claude = stub_claude(tmp_path, auth_output=json.dumps(SIGNED_IN, indent=2) + "\n")
     assert run(check_claude(configured_path=claude, flatpak=False)) == "ready"
 
 
 def test_check_signed_out(tmp_path):
     # Signed out, claude exits 1; the status still comes from the JSON.
-    claude = stub_claude(tmp_path, json.dumps(SIGNED_OUT, indent=2) + "\n", auth_exit=1)
+    claude = stub_claude(tmp_path, auth_output=json.dumps(SIGNED_OUT, indent=2) + "\n", auth_exit=1)
     assert run(check_claude(configured_path=claude, flatpak=False)) == "signed-out"
 
 
@@ -165,7 +167,7 @@ def test_check_signed_out(tmp_path):
 def test_check_without_status_asks_version(tmp_path, version_exit, state):
     # No status to read: offer to sign in only if claude runs at all.
     # flatpak-spawn --host prints nothing and exits 1 when claude is missing.
-    claude = stub_claude(tmp_path, "", auth_exit=1, version_exit=version_exit)
+    claude = stub_claude(tmp_path, auth_exit=1, version_exit=version_exit)
     assert run(check_claude(configured_path=claude, flatpak=False)) == state
 
 
@@ -192,7 +194,7 @@ def test_check_claude_gone_before_version(tmp_path):
 
 
 def test_status_follows_check(tmp_path):
-    claude = stub_claude(tmp_path, json.dumps(SIGNED_IN, indent=2) + "\n")
+    claude = stub_claude(tmp_path, auth_output=json.dumps(SIGNED_IN, indent=2) + "\n")
     status = ClaudeStatus()
     seen = []
     status.connect("notify::state", lambda obj, _pspec: seen.append(obj.props.state))
@@ -203,7 +205,7 @@ def test_status_follows_check(tmp_path):
 
 
 def test_status_shows_checking_again(tmp_path):
-    claude = stub_claude(tmp_path, json.dumps(SIGNED_OUT, indent=2) + "\n", auth_exit=1)
+    claude = stub_claude(tmp_path, auth_output=json.dumps(SIGNED_OUT, indent=2) + "\n", auth_exit=1)
     status = ClaudeStatus()
     run(status.check(configured_path=claude))
     seen = []

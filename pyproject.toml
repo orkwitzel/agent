@@ -1,19 +1,128 @@
 # Tooling config only. The app is built and installed with Meson.
+# The rules these tools enforce are explained in CONTRIBUTING.md.
+
+[dependency-groups]
+# Everything a contributor's venv needs on top of PyGObject from the system.
+# Linters are pinned so every machine and CI agree on the result.
+dev = [
+    "pydantic>=2.10",
+    "markdown-it-py",
+    "pytest",
+    "meson>=1.5",
+    "ninja",
+    "ruff==0.16.8",
+    "basedpyright==1.40.1",
+    "pygobject-stubs==2.17.0",
+]
 
 [tool.ruff]
 line-length = 100
 target-version = "py312"
 src = ["src", "tests"]
+extend-include = ["src/agent.in"]
 extend-exclude = ["subprojects", "build", "_install"]
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "UP", "B"]
+preview = true
+explicit-preview-rules = true
+select = [
+    "E", "F", "W",  # pycodestyle, pyflakes
+    "I",            # import order, and the required __future__ import
+    "UP",           # modern syntax, f-strings
+    "B",            # bugbear: mutable defaults, raise ... from
+    "ANN",          # type hints on every signature
+    "PGH003",       # type-ignore comments name their error
+    "TID",          # banned APIs, absolute imports
+    "C90",          # complexity
+    "PLR0913",      # too many parameters
+    "PLR1702",      # nesting depth
+    "PLC0415",      # imports at the top
+    "PLW0603",      # no global statement
+    "RET",          # early returns
+    "FBT001", "FBT002",  # boolean parameters are keyword-only
+    "G", "LOG",     # logging calls
+    "PTH",          # pathlib
+    "C4",           # comprehensions
+    "N",            # naming
+    "D",            # docstrings
+    "ERA001",       # commented-out code
+    "TD",           # TODOs carry an issue
+    "BLE001",       # blind except unless logged
+    "S110",         # try-except-pass
+    "T20",          # print
+    "PT",           # pytest style
+    "ASYNC",        # blocking calls in async code
+    "RUF100",       # stale noqa
+]
+ignore = [
+    "D105",   # magic methods document themselves
+    "D107",   # the class docstring covers __init__
+    "D401",   # docstrings are prose, not necessarily imperative
+    "TD002",  # TODOs carry an issue, not an author
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests are exempt from type hints and docstrings; their names say what they test.
+"tests/**" = ["ANN", "D"]
+# The one module allowed to subclass pydantic.BaseModel.
+"src/agent/core/model.py" = ["TID251"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.pylint]
+max-args = 5
+max-nested-blocks = 3
 
 [tool.ruff.lint.isort]
-known-first-party = ["agent", "conftest"]
+known-first-party = ["agent", "support"]
+required-imports = ["from __future__ import annotations"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "pep257"
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"typing.Any".msg = "Any is banned: use a precise type, or pydantic.JsonValue for JSON."
+"typing.cast".msg = "Narrow with isinstance instead: cast is an unchecked claim."
+"typing.TYPE_CHECKING".msg = "Import at runtime: pydantic needs the types. A cycle means the modules are split wrong."
+"typing.NamedTuple".msg = "Use a pydantic model (agent.core.model.Model)."
+"typing.TypedDict".msg = "Use a pydantic model (agent.core.model.Model or WireModel)."
+"collections.namedtuple".msg = "Use a pydantic model (agent.core.model.Model)."
+"dataclasses".msg = "Use a pydantic model (agent.core.model.Model or WireModel)."
+"pydantic.BaseModel".msg = "Inherit agent.core.model.Model or WireModel instead."
+"enum".msg = "Use a Literal type for a fixed set of values."
+"abc".msg = "Use typing.Protocol for interfaces."
+"subprocess".msg = "Use Gio.Subprocess through agent.core.hostspawn: subprocess blocks the main loop."
+"os.system".msg = "Use Gio.Subprocess through agent.core.hostspawn."
+"os.popen".msg = "Use Gio.Subprocess through agent.core.hostspawn."
+"time.sleep".msg = "Use await asyncio.sleep() or GLib.timeout_add: time.sleep freezes the window."
+"urllib.request".msg = "Blocking network call: use the Gio or libsoup async APIs."
+"os.path".msg = "Use pathlib.Path."
+
+[tool.basedpyright]
+include = ["src"]
+pythonVersion = "3.12"
+typeCheckingMode = "strict"
+enableTypeIgnoreComments = false
+reportAny = "error"
+reportExplicitAny = "error"
+reportIgnoreCommentWithoutRule = "error"
+reportUnnecessaryTypeIgnoreComment = "error"
+reportImplicitOverride = "error"
+reportMatchNotExhaustive = "error"
+reportPrivateUsage = "error"
+reportUnnecessaryIsInstance = "error"
+reportUnnecessaryComparison = "error"
+# gi.repository is generated at runtime; pygobject-stubs supplies the types.
+reportMissingModuleSource = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src", "tests"]
+addopts = ["--import-mode=importlib"]
 filterwarnings = [
     # Raised inside PyGObject itself on Python 3.14; not ours to fix.
     "ignore::DeprecationWarning:gi.*",

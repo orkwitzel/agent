@@ -97,7 +97,7 @@ _THREAD_COLUMNS = ", ".join(Thread.model_fields)
 class Store:
     """Agent's SQLite database, migrated to the latest schema on open."""
 
-    def __init__(self, path: str | Path):
+    def __init__(self, path: str | Path) -> None:
         self._db = sqlite3.connect(path)
         self._db.execute("PRAGMA foreign_keys = ON")
         self._db.execute("PRAGMA journal_mode = WAL")
@@ -108,8 +108,8 @@ class Store:
         self._db.close()
 
     def _migrate(self) -> None:
-        row: tuple[int] = self._db.execute("PRAGMA user_version").fetchone()
-        (version,) = row
+        rows: list[tuple[int]] = self._db.execute("PRAGMA user_version").fetchall()
+        [(version,)] = rows
         for target, script in enumerate(_MIGRATIONS[version:], start=version + 1):
             with self._db:
                 self._db.executescript(script)
@@ -128,10 +128,10 @@ class Store:
                 "INSERT OR IGNORE INTO projects (path, name, created_at) VALUES (?, ?, ?)",
                 (path, name, time.time()),
             )
-        row: tuple[object, ...] = self._db.execute(
+        rows: list[tuple[object, ...]] = self._db.execute(
             f"SELECT {_PROJECT_COLUMNS} FROM projects WHERE path = ?", (path,)
-        ).fetchone()
-        return _from_row(Project, row)
+        ).fetchall()
+        return _from_row(Project, rows[0])
 
     def projects(self) -> list[Project]:
         """All projects, sorted by name."""
@@ -151,22 +151,22 @@ class Store:
         """Start a thread in `project`'s folder. `model` None means the agent's default."""
         now = time.time()
         with self._db:
-            row: tuple[object, ...] = self._db.execute(
+            rows: list[tuple[object, ...]] = self._db.execute(
                 "INSERT INTO threads"
                 " (project_id, title, model, working_dir, created_at, updated_at)"
                 f" VALUES (?, ?, ?, ?, ?, ?) RETURNING {_THREAD_COLUMNS}",
                 (project.id, title, model, project.path, now, now),
-            ).fetchone()
-        return _from_row(Thread, row)
+            ).fetchall()
+        return _from_row(Thread, rows[0])
 
     def thread(self, thread_id: int) -> Thread:
         """The thread with this id. Raises KeyError if there is none."""
-        row: tuple[object, ...] | None = self._db.execute(
+        rows: list[tuple[object, ...]] = self._db.execute(
             f"SELECT {_THREAD_COLUMNS} FROM threads WHERE id = ?", (thread_id,)
-        ).fetchone()
-        if row is None:
+        ).fetchall()
+        if not rows:
             raise KeyError(thread_id)
-        return _from_row(Thread, row)
+        return _from_row(Thread, rows[0])
 
     def threads(self, project_id: int) -> list[Thread]:
         """A project's threads, most recently active first."""

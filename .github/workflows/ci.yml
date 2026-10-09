@@ -13,18 +13,17 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install dependencies
         run: >
-          dnf install -y python3 python3-gobject gtk4 libadwaita python3-pytest
-          python3-markdown-it-py python3-pydantic ruff meson ninja-build glib2-devel blueprint-compiler
-          desktop-file-utils appstream gettext
-      - name: Lint
+          dnf install -y python3 python3-pip python3-gobject gtk4 libadwaita
+          python3-markdown-it-py python3-pydantic meson ninja-build glib2-devel
+          blueprint-compiler desktop-file-utils appstream gettext
+      - name: Install dev tools
         run: |
-          ruff check .
-          ruff format --check .
-      - name: Unit tests
-        run: pytest -v
-      - name: Meson build and validation tests
+          python3 -m venv --system-site-packages .venv
+          PYGOBJECT_STUB_CONFIG=Gtk4,Gdk4 .venv/bin/pip install --group dev
+      - name: Lint, type check and test
         run: |
-          meson setup build
+          export PATH=$PWD/.venv/bin:$PATH
+          meson setup build -Ddev=true
           meson test -C build --print-errorlogs
 
   flatpak:

@@ -1,7 +1,7 @@
 data/io.github.orkwitzel.Agent.desktop.in
 data/io.github.orkwitzel.Agent.metainfo.xml.in
 data/io.github.orkwitzel.Agent.gschema.xml
-src/agent/main.py
+src/agent/ui/application.py
 src/agent/ui/window.py
 src/agent/ui/window.blp
 src/agent/ui/preferences.py

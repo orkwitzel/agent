@@ -1,26 +1,35 @@
 #!@PYTHON@
 # SPDX-License-Identifier: GPL-3.0-or-later
+"""The installed `agent` command: sets up translations and resources, then runs Agent.
+
+Meson fills in the @...@ values when it installs this file.
+"""
+
+from __future__ import annotations
 
 import gettext
 import locale
-import os
 import signal
 import sys
+from pathlib import Path
 
-VERSION = '@VERSION@'
-pkgdatadir = '@pkgdatadir@'
-localedir = '@localedir@'
+VERSION = "@VERSION@"
+PKGDATADIR = "@pkgdatadir@"
+LOCALEDIR = "@localedir@"
 
-sys.path.insert(1, pkgdatadir)
+sys.path.insert(1, PKGDATADIR)
 signal.signal(signal.SIGINT, signal.SIG_DFL)
-locale.bindtextdomain('agent', localedir)
-locale.textdomain('agent')
-gettext.install('agent', localedir)
+locale.bindtextdomain("agent", LOCALEDIR)
+locale.textdomain("agent")
+gettext.install("agent", LOCALEDIR)
 
-if __name__ == '__main__':
+if __name__ == "__main__":
+    # Only importable once PKGDATADIR is on sys.path.
     from gi.repository import Gio
-    resource = Gio.Resource.load(os.path.join(pkgdatadir, 'agent.gresource'))
+
+    resource = Gio.Resource.load(str(Path(PKGDATADIR) / "agent.gresource"))
     resource._register()
 
     from agent import main
+
     sys.exit(main.main(VERSION))

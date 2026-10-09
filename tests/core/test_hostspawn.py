@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+from __future__ import annotations
+
 from agent.core.hostspawn import host_argv, scope_unit_name
 
 

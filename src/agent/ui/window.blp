@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 using Gtk 4.0;
 using Adw 1;
 
@@ -24,7 +25,7 @@ template $AgentWindow: Adw.ApplicationWindow {
           [start]
           Gtk.Button {
             icon-name: "folder-new-symbolic";
-            tooltip-text: _("Add Project");
+            tooltip-text: _("Add Project…");
             action-name: "win.add-project";
           }
 
@@ -47,7 +48,7 @@ template $AgentWindow: Adw.ApplicationWindow {
               description: _("Add a project folder to start a thread");
 
               child: Gtk.Button {
-                label: _("_Add Project");
+                label: _("_Add Project…");
                 use-underline: true;
                 halign: center;
                 action-name: "win.add-project";
@@ -141,7 +142,9 @@ template $AgentWindow: Adw.ApplicationWindow {
             child: Adw.StatusPage {
               icon-name: "dialog-warning-symbolic";
               title: _("Claude Code Not Found");
-              description: _("Agent works with the Claude Code command-line tool. Install it, then set its location in Preferences if it isn't on your PATH.");
+              description: _(
+                "Agent works with the Claude Code command-line tool. Install it, then set its location in Preferences if it isn't on your PATH."
+              );
 
               child: Gtk.Box {
                 orientation: vertical;
@@ -171,7 +174,9 @@ template $AgentWindow: Adw.ApplicationWindow {
             child: Adw.StatusPage {
               icon-name: "system-users-symbolic";
               title: _("Sign In to Claude");
-              description: _("Claude Code is installed but not signed in. Run “claude auth login” in a terminal, then check again.");
+              description: _(
+                "Claude Code is installed but not signed in. Run “claude auth login” in a terminal, then check again."
+              );
 
               child: Gtk.Button {
                 label: _("_Check Again");

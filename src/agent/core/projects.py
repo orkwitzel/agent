@@ -33,11 +33,11 @@ class ProjectList:
 
     def __init__(self, store: Store) -> None:
         self._store = store
-        self._items = Gio.ListStore(item_type=ProjectItem)
+        self._items: Gio.ListStore[ProjectItem] = Gio.ListStore(item_type=ProjectItem)
         self._reload()
 
     @property
-    def items(self) -> Gio.ListModel:
+    def items(self) -> Gio.ListModel[ProjectItem]:
         """A list model of `ProjectItem`. Change it through this object, not directly."""
         return self._items
 

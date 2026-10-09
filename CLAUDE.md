@@ -9,11 +9,11 @@ reasons are in `docs/design.md`; read it before changing architecture.
 
 ```sh
 python3 -m venv --system-site-packages .venv
-.venv/bin/pip install meson ninja ruff pytest markdown-it-py pydantic
+PYGOBJECT_STUB_CONFIG=Gtk4,Gdk4 .venv/bin/pip install --group dev
 
-.venv/bin/pytest                      # unit + process tests (no real claude needed)
-.venv/bin/ruff check . && .venv/bin/ruff format --check .
-PATH=$PWD/.venv/bin:$PATH meson setup build --prefix=$PWD/_install
+PATH=$PWD/.venv/bin:$PATH meson setup build -Ddev=true --prefix=$PWD/_install
+PATH=$PWD/.venv/bin:$PATH meson test -C build    # lint, types and tests; no real claude needed
+PATH=$PWD/.venv/bin:$PATH meson compile -C build fix    # apply formatters and safe fixes
 PATH=$PWD/.venv/bin:$PATH meson install -C build
 GSETTINGS_SCHEMA_DIR=_install/share/glib-2.0/schemas _install/bin/agent
 ```
@@ -39,8 +39,9 @@ blueprint-compiler falls back to a Meson subproject if not installed.
   Don't use newer API without a version check.
 - UI layouts are Blueprint (`.blp`); all user-visible strings go through
   gettext (`_()`, `_("...")` in Blueprint) and their files in `po/POTFILES.in`.
-- Protocol changes are caught by fixtures in `tests/fixtures/`, replayed by
-  `tests/fake_claude.py`. Add a fixture for every new message shape.
+- Protocol changes are caught by fixtures in `tests/support/fixtures/`,
+  replayed by `tests/support/fake_claude.py`. Add a fixture for every new
+  message shape.
 
 ## Agent skills
 

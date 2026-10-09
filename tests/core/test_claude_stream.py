@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+from __future__ import annotations
+
 import json
 
 from agent.core import claude_stream
@@ -13,7 +15,7 @@ from agent.core.events import (
     TurnCompleted,
     Unrecognized,
 )
-from conftest import FIXTURES
+from support import FIXTURES
 
 
 def parse_fixture(name):
@@ -24,7 +26,7 @@ def parse_fixture(name):
 
 
 def test_simple_turn_event_sequence():
-    kinds = [type(e) for e in parse_fixture("simple_turn.jsonl")]
+    kinds = [type(event) for event in parse_fixture("simple_turn.jsonl")]
     assert kinds == [
         SessionStarted,
         AssistantText,
@@ -102,7 +104,12 @@ def test_control_reply():
 
 def test_unknown_control_request_is_kept():
     events = parse_fixture("unknown_control_request.jsonl")
-    assert [type(e) for e in events] == [SessionStarted, Unrecognized, AssistantText, TurnCompleted]
+    assert [type(event) for event in events] == [
+        SessionStarted,
+        Unrecognized,
+        AssistantText,
+        TurnCompleted,
+    ]
     assert events[1].raw["request"]["subtype"] == "future_subtype"
 
 
@@ -138,8 +145,8 @@ def test_allow_tool_echoes_input():
 
 
 def test_user_message_with_image():
-    msg = claude_stream.user_message("look", images=[("image/png", "AAAA")])
-    assert msg["message"]["content"][1] == {
+    message = claude_stream.user_message("look", images=[("image/png", "AAAA")])
+    assert message["message"]["content"][1] == {
         "type": "image",
         "source": {"type": "base64", "media_type": "image/png", "data": "AAAA"},
     }

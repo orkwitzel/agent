@@ -1,9 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+from __future__ import annotations
+
 import asyncio
 import logging
 
-from agent.core.tasks import TaskSet
-from conftest import run
+from agent.core.mainloop import TaskSet
+from support import run
 
 
 def test_spawned_task_runs_to_completion():
@@ -29,7 +31,7 @@ def test_failing_task_is_logged(caplog):
         TaskSet().spawn(fail())
         await asyncio.sleep(0.05)
 
-    with caplog.at_level(logging.ERROR, logger="agent.core.tasks"):
+    with caplog.at_level(logging.ERROR, logger="agent.core.mainloop"):
         run(scenario())
     [record] = caplog.records
     assert record.message == "Background task failed"

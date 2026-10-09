@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+from __future__ import annotations
+
 import sqlite3
 
 from agent.core.events import (
