@@ -1,9 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+import asyncio
 import json
+import shlex
 
 import pytest
 
-from agent.core.claude_cli import find_claude, parse_auth_status
+from agent.core.claude_cli import ClaudeState, check_claude, find_claude, parse_auth_status
+from agent.core.process import install_glib_event_loop
 
 
 def make_executable(path):
@@ -130,3 +133,65 @@ def test_auth_signed_out():
 )
 def test_auth_no_status(output):
     assert parse_auth_status(output) is None
+
+
+# check_claude
+
+
+def run(coro):
+    install_glib_event_loop()
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+
+
+def fake_claude(tmp_path, auth_output="", auth_exit=0, version_exit=0):
+    """A claude that prints `auth_output` for `auth status` and exits with
+    `version_exit` for `--version`. Only shell builtins, so PATH can be empty."""
+    script = tmp_path / "claude"
+    script.write_text(
+        "#!/bin/sh\n"
+        f'if [ "$1" = auth ]; then printf %s {shlex.quote(auth_output)}; exit {auth_exit}; fi\n'
+        f"exit {version_exit}\n"
+    )
+    script.chmod(0o755)
+    return str(script)
+
+
+def test_check_signed_in(tmp_path):
+    claude = fake_claude(tmp_path, json.dumps(SIGNED_IN, indent=2) + "\n")
+    assert run(check_claude(claude, flatpak=False)) is ClaudeState.READY
+
+
+def test_check_signed_out(tmp_path):
+    # Signed out, claude exits 1; the status still comes from the JSON.
+    claude = fake_claude(tmp_path, json.dumps(SIGNED_OUT, indent=2) + "\n", auth_exit=1)
+    assert run(check_claude(claude, flatpak=False)) is ClaudeState.SIGNED_OUT
+
+
+@pytest.mark.parametrize(
+    ("version_exit", "state"), [(0, ClaudeState.SIGNED_OUT), (1, ClaudeState.MISSING)]
+)
+def test_check_without_status_asks_version(tmp_path, version_exit, state):
+    # No status to read: offer to sign in only if claude runs at all.
+    # flatpak-spawn --host prints nothing and exits 1 when claude is missing.
+    claude = fake_claude(tmp_path, "", auth_exit=1, version_exit=version_exit)
+    assert run(check_claude(claude, flatpak=False)) is state
+
+
+def test_check_not_found(home):
+    assert run(check_claude(flatpak=False)) is ClaudeState.MISSING
+
+
+def test_check_cannot_spawn(tmp_path):
+    assert run(check_claude(str(tmp_path / "no-such-claude"), flatpak=False)) is ClaudeState.MISSING
+
+
+def test_check_claude_gone_before_version(tmp_path):
+    # It ran once without printing a status, then vanished: still MISSING.
+    script = tmp_path / "claude"
+    script.write_text('#!/bin/sh\nrm -- "$0"\nexit 1\n')
+    script.chmod(0o755)
+    assert run(check_claude(str(script), flatpak=False)) is ClaudeState.MISSING

@@ -7,17 +7,29 @@ Agent never reads, stores or refreshes credentials. It only asks
 
 from __future__ import annotations
 
+import enum
 import json
 import os
 import shutil
 from dataclasses import dataclass
 
+from gi.repository import GLib
+
 from agent.core import hostspawn
+from agent.core.process import run_capture
 
 DOWNLOAD_URL = "https://code.claude.com/docs/en/setup"
 
 # Where Anthropic's installer puts claude, for when PATH doesn't include it.
 _FALLBACK_LOCATIONS = ("~/.local/bin/claude", "~/.claude/local/claude")
+
+
+class ClaudeState(enum.Enum):
+    """What the app can do with the user's claude."""
+
+    READY = enum.auto()
+    SIGNED_OUT = enum.auto()
+    MISSING = enum.auto()
 
 
 @dataclass(frozen=True)
@@ -36,8 +48,8 @@ def find_claude(configured_path: str = "", *, flatpak: bool | None = None) -> st
     isn't searched. `--filesystem=host` shows the installer's locations
     at the same paths as on the host, so those are tried; failing that,
     plain "claude" is returned for `flatpak-spawn --host` to look up on
-    the host's PATH. Whether that exists is only known once
-    `claude auth status` runs (see `parse_auth_status`).
+    the host's PATH. Whether that exists is only known once it runs
+    (see `check_claude`).
     """
     if configured_path:
         return configured_path
@@ -73,7 +85,8 @@ def parse_auth_status(output: str) -> AuthStatus | None:
     `loggedIn`, meaning claude didn't run or printed something else.
     The exit status can't tell the two apart: claude exits 1 when signed
     out, and in Flatpak `flatpak-spawn --host` exits 1 with no output
-    when claude isn't on the host's PATH. Running `version_argv` can.
+    when claude isn't on the host's PATH. `check_claude` asks
+    `claude --version` to tell them apart.
     """
     try:
         data = json.loads(output)
@@ -86,3 +99,28 @@ def parse_auth_status(output: str) -> AuthStatus | None:
         method=data.get("authMethod"),
         subscription=data.get("subscriptionType"),
     )
+
+
+async def check_claude(configured_path: str = "", *, flatpak: bool | None = None) -> ClaudeState:
+    """Find claude and ask it whether the user is signed in.
+
+    The exit status of `claude auth status` is ignored: claude exits 1
+    when signed out. If it prints no status (see `parse_auth_status`),
+    `claude --version` decides: if claude runs at all, offer to sign in.
+    """
+    claude = find_claude(configured_path, flatpak=flatpak)
+    if claude is None:
+        return ClaudeState.MISSING
+    try:
+        _status, output = await run_capture(
+            hostspawn.host_argv(auth_status_argv(claude), flatpak=flatpak)
+        )
+        auth = parse_auth_status(output)
+        if auth is None:
+            status, _output = await run_capture(
+                hostspawn.host_argv(version_argv(claude), flatpak=flatpak)
+            )
+            return ClaudeState.SIGNED_OUT if status == 0 else ClaudeState.MISSING
+    except GLib.Error:  # Couldn't spawn it.
+        return ClaudeState.MISSING
+    return ClaudeState.READY if auth.logged_in else ClaudeState.SIGNED_OUT

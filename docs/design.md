@@ -31,9 +31,15 @@ claude -p --input-format stream-json --output-format stream-json \
   Driving the real binary is the clearest fit. It is also the dominant
   pattern among similar tools (Opcode, Vibe Kanban, Sculptor, Jean).
 - **Credentials:** never read, stored or refreshed. Login state comes from
-  `claude auth status` (JSON). Signing in means running `claude auth login`.
-- **Finding claude:** PATH, or a path set in Preferences. If it's missing,
-  link to the download page.
+  `claude auth status` (JSON), whose exit status is ignored (it exits 1 when
+  signed out). If it prints no status, `claude --version` decides: if claude
+  runs, offer to sign in; otherwise it's missing. Signing in means running
+  `claude auth login`.
+- **Finding claude:** a path set in Preferences, then PATH, then the
+  installer's locations (`~/.local/bin`, `~/.claude/local`). In Flatpak the
+  sandbox's PATH is skipped and, after those locations, plain `claude` is
+  left for `flatpak-spawn --host` to find on the host's PATH. If it's
+  missing, link to the download page.
 - **Permissions:** v1 auto-allows every `can_use_tool` request in code and
   warns on first run. Because the permission channel is already wired, adding
   approval cards later is a UI-only change.
