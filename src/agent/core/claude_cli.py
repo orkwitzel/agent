@@ -2,7 +2,8 @@
 """Finding the user's `claude` binary and reading its login state.
 
 Agent never reads, stores or refreshes credentials. It only asks
-`claude auth status` and, to sign in, runs `claude auth login`.
+`claude auth status` (and `claude --version` when that prints no
+status) and, to sign in, runs `claude auth login`.
 """
 
 from __future__ import annotations

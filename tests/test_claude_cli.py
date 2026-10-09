@@ -147,7 +147,7 @@ def run(coro):
         loop.close()
 
 
-def fake_claude(tmp_path, auth_output="", auth_exit=0, version_exit=0):
+def stub_claude(tmp_path, auth_output="", auth_exit=0, version_exit=0):
     """A claude that prints `auth_output` for `auth status` and exits with
     `version_exit` for `--version`. Only shell builtins, so PATH can be empty."""
     script = tmp_path / "claude"
@@ -161,13 +161,13 @@ def fake_claude(tmp_path, auth_output="", auth_exit=0, version_exit=0):
 
 
 def test_check_signed_in(tmp_path):
-    claude = fake_claude(tmp_path, json.dumps(SIGNED_IN, indent=2) + "\n")
+    claude = stub_claude(tmp_path, json.dumps(SIGNED_IN, indent=2) + "\n")
     assert run(check_claude(claude, flatpak=False)) is ClaudeState.READY
 
 
 def test_check_signed_out(tmp_path):
     # Signed out, claude exits 1; the status still comes from the JSON.
-    claude = fake_claude(tmp_path, json.dumps(SIGNED_OUT, indent=2) + "\n", auth_exit=1)
+    claude = stub_claude(tmp_path, json.dumps(SIGNED_OUT, indent=2) + "\n", auth_exit=1)
     assert run(check_claude(claude, flatpak=False)) is ClaudeState.SIGNED_OUT
 
 
@@ -177,7 +177,7 @@ def test_check_signed_out(tmp_path):
 def test_check_without_status_asks_version(tmp_path, version_exit, state):
     # No status to read: offer to sign in only if claude runs at all.
     # flatpak-spawn --host prints nothing and exits 1 when claude is missing.
-    claude = fake_claude(tmp_path, "", auth_exit=1, version_exit=version_exit)
+    claude = stub_claude(tmp_path, "", auth_exit=1, version_exit=version_exit)
     assert run(check_claude(claude, flatpak=False)) is state
 
 
