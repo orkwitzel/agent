@@ -45,16 +45,9 @@ Or open the folder in GNOME Builder and run it with the Flatpak manifest in
 
 ## Development
 
-```sh
-python3 -m venv --system-site-packages .venv
-PYGOBJECT_STUB_CONFIG=Gtk4,Gdk4 .venv/bin/pip install --group dev
-PATH=$PWD/.venv/bin:$PATH meson setup build -Ddev=true
-PATH=$PWD/.venv/bin:$PATH meson test -C build
-```
-
-The tests replay recorded `claude` output through a fake `claude`
-(`tests/support/fake_claude.py`), so they don't need Claude Code or use any
-usage. See `docs/design.md` for the architecture and the reasoning behind it.
+See `CONTRIBUTING.md` for setting up, running the checks and the code
+standards, and `docs/design.md` for the architecture and the reasoning
+behind it.
 
 ## License
 

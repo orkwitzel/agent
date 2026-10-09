@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Code standards no linter checks. CONTRIBUTING.md explains each one."""
+"""Code standards no linter checks. Each test says why its rule exists."""
 
 from __future__ import annotations
 
@@ -43,6 +43,7 @@ def where(path, node):
     return f"{path.relative_to(ROOT)}:{node.lineno} {node.name}"
 
 
+# The license travels with a file copied out of the repo.
 def test_every_source_file_has_a_license_line():
     missing = [
         str(path.relative_to(ROOT))
@@ -53,6 +54,7 @@ def test_every_source_file_has_a_license_line():
     assert missing == []
 
 
+# Call sites name what they pass: run_capture(argv, cwd=path), never a bare value.
 def test_parameters_with_defaults_are_keyword_only():
     positional = [
         where(path, function)
@@ -63,6 +65,7 @@ def test_parameters_with_defaults_are_keyword_only():
     assert positional == []
 
 
+# A function that needs no instance is a module-level function.
 def test_no_staticmethods():
     static = [
         where(path, function)
@@ -76,6 +79,7 @@ def test_no_staticmethods():
     assert static == []
 
 
+# The _ prefix already marks what's private; __all__ would be a second list to keep in sync.
 def test_no_dunder_all():
     declaring = [
         str(path.relative_to(ROOT))
@@ -87,6 +91,7 @@ def test_no_dunder_all():
     assert declaring == []
 
 
+# A module is named for what it holds, which utils or helpers never says.
 def test_no_vague_module_names():
     vague = [
         str(path.relative_to(ROOT)) for path in python_files() if path.stem in BANNED_MODULE_NAMES

@@ -1,5 +1,6 @@
 # Tooling config only. The app is built and installed with Meson.
-# The rules these tools enforce are explained in CONTRIBUTING.md.
+# This file is the source of truth for the rules its tools enforce;
+# CONTRIBUTING.md holds the ones no tool can check.
 
 [dependency-groups]
 # Everything a contributor's venv needs on top of PyGObject from the system.
