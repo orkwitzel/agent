@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from agent.core.events import AssistantText, TokenUsage, ToolCall, TurnCompleted
-from agent.core.store import Store
+from agent.core.store import Store, database_path
 
 
 def test_projects_and_threads(tmp_path):
@@ -50,3 +50,13 @@ def test_removing_project_removes_threads(tmp_path):
     store.remove_project(project.id)
     assert store.projects() == []
     assert store.events(thread.id) == []
+
+
+def test_database_path_is_named_after_app_id(tmp_path):
+    path = database_path(tmp_path)
+    assert path == tmp_path / "io.github.orkwitzel.Agent" / "agent.db"
+    assert path.parent.is_dir()
+    assert path.parent.stat().st_mode & 0o777 == 0o700
+    assert database_path(tmp_path) == path  # folder already exists
+    Store(path).close()
+    assert path.is_file()

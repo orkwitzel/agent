@@ -10,11 +10,10 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gio  # noqa: E402
 
+from agent.core import APP_ID  # noqa: E402
 from agent.core.process import install_glib_event_loop  # noqa: E402
 from agent.ui.preferences import PreferencesDialog  # noqa: E402
 from agent.ui.window import AgentWindow  # noqa: E402
-
-APP_ID = "io.github.orkwitzel.Agent"
 
 
 class AgentApplication(Adw.Application):
