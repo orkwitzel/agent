@@ -197,8 +197,8 @@ def test_status_follows_check(tmp_path):
     claude = stub_claude(tmp_path, auth_output=json.dumps(SIGNED_IN, indent=2) + "\n")
     status = ClaudeStatus()
     seen = []
-    status.connect("notify::state", lambda obj, _pspec: seen.append(obj.props.state))
-    assert status.props.state == "checking"
+    status.connect("notify::state", lambda obj, _pspec: seen.append(obj.state))
+    assert status.state == "checking"
 
     run(status.check(configured_path=claude))
     assert seen == ["checking", "ready"]
@@ -209,7 +209,7 @@ def test_status_shows_checking_again(tmp_path):
     status = ClaudeStatus()
     run(status.check(configured_path=claude))
     seen = []
-    status.connect("notify::state", lambda obj, _pspec: seen.append(obj.props.state))
+    status.connect("notify::state", lambda obj, _pspec: seen.append(obj.state))
 
     run(status.check(configured_path=claude))
     assert seen == ["checking", "signed-out"]

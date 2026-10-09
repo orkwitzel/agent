@@ -6,7 +6,7 @@ from agent.core.store import Store
 
 
 def names(projects):
-    return [item.props.name for item in projects.items]
+    return [item.name for item in projects.items]
 
 
 def test_lists_existing_projects_by_name(tmp_path):
@@ -16,7 +16,7 @@ def test_lists_existing_projects_by_name(tmp_path):
 
     projects = ProjectList(store)
     assert names(projects) == ["Alpha", "zeta"]
-    assert [item.props.path for item in projects.items] == ["/code/Alpha", "/code/zeta"]
+    assert [item.path for item in projects.items] == ["/code/Alpha", "/code/zeta"]
 
 
 def test_add_updates_the_list(tmp_path):
@@ -27,5 +27,5 @@ def test_add_updates_the_list(tmp_path):
     projects.add("/code/app")
     projects.add("/code/app")  # already a project
     assert names(projects) == ["app"]
-    assert projects.items.props.n_items == 1
+    assert projects.items.get_n_items() == 1
     assert changes[0] == (0, 0, 1)
