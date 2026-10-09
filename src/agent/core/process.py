@@ -20,7 +20,7 @@ gi.require_version("Gio", "2.0")
 from gi.repository import Gio, GLib  # noqa: E402
 
 from agent.core import claude_stream  # noqa: E402
-from agent.core.events import Event, PermissionRequest  # noqa: E402
+from agent.core.events import Event, PermissionRequest, Unrecognized  # noqa: E402
 
 # How much of the end of stderr AgentProcess keeps, to explain an exit.
 STDERR_TAIL_BYTES = 8192
@@ -131,6 +131,8 @@ class AgentProcess:
     Reads stream-json from stdout and yields neutral events. With
     `auto_allow` (v1 behaviour) every permission request is approved
     in code; the request is still yielded so the UI can show it.
+    Control requests we don't handle get an error reply and are yielded
+    as `Unrecognized`.
 
     Every pending call can be cancelled by cancelling the task awaiting
     it, and kill() cancels all of them. Cancelling the task iterating
@@ -230,6 +232,10 @@ class AgentProcess:
                 for event in claude_stream.parse_line(line):
                     if self._auto_allow and isinstance(event, PermissionRequest):
                         await self.send(claude_stream.allow_tool(event))
+                    elif isinstance(event, Unrecognized):
+                        reply = claude_stream.unsupported_control_request(event.raw)
+                        if reply is not None:
+                            await self.send(reply)
                     yield event
         except GLib.Error as error:
             if not _is_cancelled(error):

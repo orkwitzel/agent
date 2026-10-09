@@ -254,8 +254,28 @@ def deny_tool(request: PermissionRequest, message: str) -> dict[str, Any]:
     )
 
 
+def unsupported_control_request(msg: dict[str, Any]) -> dict[str, Any] | None:
+    """An error reply to a control request we don't handle.
+
+    The CLI waits for a reply to every control request, so one left
+    unanswered can stall the turn. Returns None if `msg` isn't a
+    control request.
+    """
+    if msg.get("type") != "control_request":
+        return None
+    subtype = (msg.get("request") or {}).get("subtype")
+    return _control_error(msg.get("request_id", ""), f"Agent does not support {subtype}")
+
+
 def _control_success(request_id: str, response: dict[str, Any]) -> dict[str, Any]:
     return {
         "type": "control_response",
         "response": {"subtype": "success", "request_id": request_id, "response": response},
+    }
+
+
+def _control_error(request_id: str, error: str) -> dict[str, Any]:
+    return {
+        "type": "control_response",
+        "response": {"subtype": "error", "request_id": request_id, "error": error},
     }

@@ -1,0 +1,4 @@
+{"type":"system","subtype":"init","session_id":"11111111-2222-3333-4444-555555555555","model":"claude-sonnet-5-5","cwd":"/tmp/project","tools":["Read","Edit","Bash"],"slash_commands":["compact","review"],"apiKeySource":"none","claude_code_version":"2.1.293","permissionMode":"default"}
+{"type":"control_request","request_id":"cli-req-1","request":{"subtype":"future_subtype","payload":{"answer":42}}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Carrying on."}]},"session_id":"11111111-2222-3333-4444-555555555555","parent_tool_use_id":null}
+{"type":"result","subtype":"success","is_error":false,"duration_ms":1200,"num_turns":1,"result":"Carrying on.","session_id":"11111111-2222-3333-4444-555555555555","total_cost_usd":0.01,"usage":{"input_tokens":900,"output_tokens":5,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}

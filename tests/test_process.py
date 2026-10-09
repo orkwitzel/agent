@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from agent.core.events import PermissionRequest, TurnCompleted
+from agent.core.events import PermissionRequest, TurnCompleted, Unrecognized
 from agent.core.process import (
     STDERR_TAIL_BYTES,
     AgentProcess,
@@ -93,6 +93,28 @@ def test_turn_with_auto_allow(tmp_path):
     assert sent[0]["type"] == "user"
     assert sent[1]["response"]["request_id"] == "cli-req-1"
     assert sent[1]["response"]["response"]["behavior"] == "allow"
+
+
+def test_unknown_control_request_gets_error_reply(tmp_path):
+    # The fake waits for our reply, so without one the turn times out.
+    record = tmp_path / "stdin.jsonl"
+    fixture = FIXTURES / "unknown_control_request.jsonl"
+    argv = [sys.executable, str(FAKE_CLAUDE), str(fixture), str(record)]
+
+    seen, status = run(one_turn(AgentProcess(argv)))
+    assert status == 0
+    assert isinstance(seen[-1], TurnCompleted)
+    assert any(isinstance(e, Unrecognized) and e.raw.get("type") == "control_request" for e in seen)
+
+    sent = [json.loads(line) for line in record.read_text().splitlines()]
+    assert sent[1] == {
+        "type": "control_response",
+        "response": {
+            "subtype": "error",
+            "request_id": "cli-req-1",
+            "error": "Agent does not support future_subtype",
+        },
+    }
 
 
 STDERR_BYTES = 200_000  # well past the 64 KiB pipe buffer
