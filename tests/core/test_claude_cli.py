@@ -1,12 +1,13 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-import asyncio
+from __future__ import annotations
+
 import json
 import shlex
 
 import pytest
 
-from agent.core.claude_cli import ClaudeState, check_claude, find_claude, parse_auth_status
-from agent.core.process import install_glib_event_loop
+from agent.core.claude_cli import ClaudeStatus, check_claude, find_claude, parse_auth_status
+from support import run
 
 
 def make_executable(path):
@@ -31,8 +32,8 @@ def home(tmp_path, monkeypatch):
 
 def test_configured_path_wins(home):
     make_executable(home / ".local/bin/claude")
-    assert find_claude("/opt/claude", flatpak=True) == "/opt/claude"
-    assert find_claude("/opt/claude", flatpak=False) == "/opt/claude"
+    assert find_claude(configured_path="/opt/claude", flatpak=True) == "/opt/claude"
+    assert find_claude(configured_path="/opt/claude", flatpak=False) == "/opt/claude"
 
 
 def test_flatpak_finds_fallback(home):
@@ -138,16 +139,7 @@ def test_auth_no_status(output):
 # check_claude
 
 
-def run(coro):
-    install_glib_event_loop()
-    loop = asyncio.new_event_loop()
-    try:
-        return loop.run_until_complete(coro)
-    finally:
-        loop.close()
-
-
-def stub_claude(tmp_path, auth_output="", auth_exit=0, version_exit=0):
+def stub_claude(tmp_path, *, auth_output="", auth_exit=0, version_exit=0):
     """A claude that prints `auth_output` for `auth status` and exits with
     `version_exit` for `--version`. Only shell builtins, so PATH can be empty."""
     script = tmp_path / "claude"
@@ -161,32 +153,33 @@ def stub_claude(tmp_path, auth_output="", auth_exit=0, version_exit=0):
 
 
 def test_check_signed_in(tmp_path):
-    claude = stub_claude(tmp_path, json.dumps(SIGNED_IN, indent=2) + "\n")
-    assert run(check_claude(claude, flatpak=False)) is ClaudeState.READY
+    claude = stub_claude(tmp_path, auth_output=json.dumps(SIGNED_IN, indent=2) + "\n")
+    assert run(check_claude(configured_path=claude, flatpak=False)) == "ready"
 
 
 def test_check_signed_out(tmp_path):
     # Signed out, claude exits 1; the status still comes from the JSON.
-    claude = stub_claude(tmp_path, json.dumps(SIGNED_OUT, indent=2) + "\n", auth_exit=1)
-    assert run(check_claude(claude, flatpak=False)) is ClaudeState.SIGNED_OUT
+    claude = stub_claude(tmp_path, auth_output=json.dumps(SIGNED_OUT, indent=2) + "\n", auth_exit=1)
+    assert run(check_claude(configured_path=claude, flatpak=False)) == "signed-out"
 
 
-@pytest.mark.parametrize(
-    ("version_exit", "state"), [(0, ClaudeState.SIGNED_OUT), (1, ClaudeState.MISSING)]
-)
+@pytest.mark.parametrize(("version_exit", "state"), [(0, "signed-out"), (1, "missing")])
 def test_check_without_status_asks_version(tmp_path, version_exit, state):
     # No status to read: offer to sign in only if claude runs at all.
     # flatpak-spawn --host prints nothing and exits 1 when claude is missing.
-    claude = stub_claude(tmp_path, "", auth_exit=1, version_exit=version_exit)
-    assert run(check_claude(claude, flatpak=False)) is state
+    claude = stub_claude(tmp_path, auth_exit=1, version_exit=version_exit)
+    assert run(check_claude(configured_path=claude, flatpak=False)) == state
 
 
 def test_check_not_found(home):
-    assert run(check_claude(flatpak=False)) is ClaudeState.MISSING
+    assert run(check_claude(flatpak=False)) == "missing"
 
 
 def test_check_cannot_spawn(tmp_path):
-    assert run(check_claude(str(tmp_path / "no-such-claude"), flatpak=False)) is ClaudeState.MISSING
+    assert (
+        run(check_claude(configured_path=str(tmp_path / "no-such-claude"), flatpak=False))
+        == "missing"
+    )
 
 
 def test_check_claude_gone_before_version(tmp_path):
@@ -194,4 +187,29 @@ def test_check_claude_gone_before_version(tmp_path):
     script = tmp_path / "claude"
     script.write_text('#!/bin/sh\nrm -- "$0"\nexit 1\n')
     script.chmod(0o755)
-    assert run(check_claude(str(script), flatpak=False)) is ClaudeState.MISSING
+    assert run(check_claude(configured_path=str(script), flatpak=False)) == "missing"
+
+
+# ClaudeStatus
+
+
+def test_status_follows_check(tmp_path):
+    claude = stub_claude(tmp_path, auth_output=json.dumps(SIGNED_IN, indent=2) + "\n")
+    status = ClaudeStatus()
+    seen = []
+    status.connect("notify::state", lambda obj, _pspec: seen.append(obj.state))
+    assert status.state == "checking"
+
+    run(status.check(configured_path=claude))
+    assert seen == ["checking", "ready"]
+
+
+def test_status_shows_checking_again(tmp_path):
+    claude = stub_claude(tmp_path, auth_output=json.dumps(SIGNED_OUT, indent=2) + "\n", auth_exit=1)
+    status = ClaudeStatus()
+    run(status.check(configured_path=claude))
+    seen = []
+    status.connect("notify::state", lambda obj, _pspec: seen.append(obj.state))
+
+    run(status.check(configured_path=claude))
+    assert seen == ["checking", "signed-out"]

@@ -58,17 +58,31 @@ claude -p --input-format stream-json --output-format stream-json \
 - **Meson** build, **Blueprint** UI files, **gettext** from day one.
 - **Async:** Gio async APIs awaited through PyGObject's asyncio integration on
   the GLib main loop. One thread. `asyncio.to_thread` for CPU-heavy work.
-  `agent.core.process` awaits Gio calls through their callback form, each
+  `agent.core.mainloop.gio_call` awaits Gio calls through their callback form, each
   with its own `Gio.Cancellable`, because before PyGObject 3.56.3 cancelling
   a task that awaits a Gio call directly raises `TypeError` and never stops
   the call.
 - **Layering:** `agent.core` (providers, events, store, process helpers)
   never imports GTK, so it is testable headless and future providers plug
   into the same neutral events.
+- **State lives in `agent.core`, widgets bind to it.** App state is
+  `GObject.Object` subclasses with properties, and `Gio.ListStore` lists,
+  wrapping pydantic data rather than copying it. Widgets bind to them
+  (Blueprint `bind`, `bind_property`, list views over the list models) and
+  forward user actions to core methods, so they hold no logic of their own
+  and the logic is tested without a display. The application owns that
+  state and hands it to its windows.
+- **Planned extension points:** providers (Codex, ACP agents) are the only
+  one. An interface (`typing.Protocol`) may be defined ahead of a second
+  implementation only for an extension point listed here.
 - **Storage:** Agent's own SQLite database of provider-neutral events. Each
   thread keeps Claude's `session_id` for `--resume`. Claude's session files
   are left to Claude.
-- **Dependencies:** PyGObject and `markdown-it-py` only.
+- **Dependencies:** PyGObject, `pydantic` (2.10 or newer, Debian 13's
+  version) and `markdown-it-py`. pydantic turns the JSON we don't control
+  (claude's stream, `claude auth status`) into strict, typed objects and
+  round-trips our events through SQLite; it is packaged in Fedora and
+  Debian, and the Flatpak uses its wheels.
 
 ## UI
 
@@ -91,8 +105,9 @@ claude -p --input-format stream-json --output-format stream-json \
 
 ## Quality and shipping
 
-- pytest on stream-json fixtures replayed by a fake `claude`, plus ruff.
-  The UI is tested by hand.
+- pytest on stream-json fixtures replayed by a fake `claude`, plus ruff
+  and basedpyright (strict), all run by `meson test` in a `-Ddev=true`
+  build. The UI is tested by hand.
 - Flatpak first: `.flatpak` bundles on GitHub Releases with an in-app
   "new version" banner, then Flathub once stable. Permissions are
   `--talk-name=org.freedesktop.Flatpak` (run claude and git on the host) and

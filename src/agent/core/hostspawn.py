@@ -9,8 +9,8 @@ one unit, and later frozen and reclaimed while idle.
 
 from __future__ import annotations
 
-import os
 import re
+from pathlib import Path
 
 from agent.core import APP_ID
 
@@ -18,10 +18,12 @@ FLATPAK_INFO = "/.flatpak-info"
 
 
 def in_flatpak() -> bool:
-    return os.path.exists(FLATPAK_INFO)
+    """Whether Agent runs inside a Flatpak sandbox."""
+    return Path(FLATPAK_INFO).exists()
 
 
 def scope_unit_name(thread_id: int, nonce: str) -> str:
+    """The systemd scope a thread's process tree runs in. `nonce` keeps it unique."""
     safe = re.sub(r"[^A-Za-z0-9_.-]", "_", nonce)
     return f"app-{APP_ID}-thread{thread_id}-{safe}.scope"
 

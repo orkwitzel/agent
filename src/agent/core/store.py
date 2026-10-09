@@ -7,15 +7,16 @@ thread can be resumed with `claude --resume`.
 
 from __future__ import annotations
 
-import dataclasses
-import json
 import sqlite3
 import time
-from dataclasses import dataclass
 from pathlib import Path
+from typing import get_args
+
+from pydantic import JsonValue, TypeAdapter
 
 from agent.core import APP_ID
-from agent.core import events as ev
+from agent.core.events import Event, Unrecognized
+from agent.core.model import Model
 
 
 def database_path(data_dir: str | Path) -> Path:
@@ -60,31 +61,24 @@ _MIGRATIONS = [
     """,
 ]
 
-_EVENT_TYPES: dict[str, type] = {
-    cls.__name__: cls
-    for cls in (
-        ev.SessionStarted,
-        ev.AssistantText,
-        ev.AssistantThinking,
-        ev.ToolCall,
-        ev.ToolResult,
-        ev.PermissionRequest,
-        ev.TurnCompleted,
-        ev.ControlReply,
-        ev.Unrecognized,
-    )
-}
+# Events are stored by class name, so a stored event decodes to its class.
+_EVENT_CLASSES: tuple[type[Event], ...] = get_args(Event)
+_EVENT_TYPES = {cls.__name__: cls for cls in _EVENT_CLASSES}
+
+_JSON: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
 
 
-@dataclass(frozen=True)
-class Project:
+class Project(Model):
+    """A folder the user works in."""
+
     id: int
     path: str
     name: str
 
 
-@dataclass(frozen=True)
-class Thread:
+class Thread(Model):
+    """One conversation with an agent, in a project's folder."""
+
     id: int
     project_id: int
     title: str
@@ -95,88 +89,107 @@ class Thread:
     branch: str | None
 
 
+# Columns are named like the fields of the model they hold.
+_PROJECT_COLUMNS = ", ".join(Project.model_fields)
+_THREAD_COLUMNS = ", ".join(Thread.model_fields)
+
+
 class Store:
-    def __init__(self, path: str | Path):
-        self._db = sqlite3.connect(str(path))
+    """Agent's SQLite database, migrated to the latest schema on open."""
+
+    def __init__(self, path: str | Path) -> None:
+        self._db = sqlite3.connect(path)
         self._db.execute("PRAGMA foreign_keys = ON")
         self._db.execute("PRAGMA journal_mode = WAL")
         self._migrate()
 
     def close(self) -> None:
+        """Close the database. The store can't be used afterwards."""
         self._db.close()
 
     def _migrate(self) -> None:
-        (version,) = self._db.execute("PRAGMA user_version").fetchone()
-        for i, script in enumerate(_MIGRATIONS[version:], start=version + 1):
+        rows: list[tuple[int]] = self._db.execute("PRAGMA user_version").fetchall()
+        [(version,)] = rows
+        for target, script in enumerate(_MIGRATIONS[version:], start=version + 1):
             with self._db:
                 self._db.executescript(script)
-                self._db.execute(f"PRAGMA user_version = {i}")
+                self._db.execute(f"PRAGMA user_version = {target}")
 
     # Projects
 
-    def add_project(self, path: str, name: str | None = None) -> Project:
+    def add_project(self, path: str, *, name: str | None = None) -> Project:
+        """Add the folder at `path`, or return it if it's already a project.
+
+        `name` defaults to the folder's name.
+        """
         name = name or Path(path).name or path
         with self._db:
             self._db.execute(
                 "INSERT OR IGNORE INTO projects (path, name, created_at) VALUES (?, ?, ?)",
                 (path, name, time.time()),
             )
-        row = self._db.execute(
-            "SELECT id, path, name FROM projects WHERE path = ?", (path,)
-        ).fetchone()
-        return Project(*row)
+        rows: list[tuple[object, ...]] = self._db.execute(
+            f"SELECT {_PROJECT_COLUMNS} FROM projects WHERE path = ?", (path,)
+        ).fetchall()
+        return _from_row(Project, rows[0])
 
     def projects(self) -> list[Project]:
-        rows = self._db.execute("SELECT id, path, name FROM projects ORDER BY name COLLATE NOCASE")
-        return [Project(*row) for row in rows]
+        """All projects, sorted by name."""
+        rows: list[tuple[object, ...]] = self._db.execute(
+            f"SELECT {_PROJECT_COLUMNS} FROM projects ORDER BY name COLLATE NOCASE"
+        ).fetchall()
+        return [_from_row(Project, row) for row in rows]
 
     def remove_project(self, project_id: int) -> None:
+        """Remove a project with its threads and their events."""
         with self._db:
             self._db.execute("DELETE FROM projects WHERE id = ?", (project_id,))
 
     # Threads
 
-    _THREAD_COLUMNS = (
-        "id, project_id, title, provider, provider_session_id, model, working_dir, branch"
-    )
-
-    def create_thread(self, project: Project, title: str, model: str | None = None) -> Thread:
+    def create_thread(self, project: Project, title: str, *, model: str | None = None) -> Thread:
+        """Start a thread in `project`'s folder. `model` None means the agent's default."""
         now = time.time()
         with self._db:
-            cur = self._db.execute(
+            rows: list[tuple[object, ...]] = self._db.execute(
                 "INSERT INTO threads"
                 " (project_id, title, model, working_dir, created_at, updated_at)"
-                " VALUES (?, ?, ?, ?, ?, ?)",
+                f" VALUES (?, ?, ?, ?, ?, ?) RETURNING {_THREAD_COLUMNS}",
                 (project.id, title, model, project.path, now, now),
-            )
-        return self.thread(cur.lastrowid)
+            ).fetchall()
+        return _from_row(Thread, rows[0])
 
     def thread(self, thread_id: int) -> Thread:
-        row = self._db.execute(
-            f"SELECT {self._THREAD_COLUMNS} FROM threads WHERE id = ?", (thread_id,)
-        ).fetchone()
-        if row is None:
+        """The thread with this id. Raises KeyError if there is none."""
+        rows: list[tuple[object, ...]] = self._db.execute(
+            f"SELECT {_THREAD_COLUMNS} FROM threads WHERE id = ?", (thread_id,)
+        ).fetchall()
+        if not rows:
             raise KeyError(thread_id)
-        return Thread(*row)
+        return _from_row(Thread, rows[0])
 
     def threads(self, project_id: int) -> list[Thread]:
-        rows = self._db.execute(
-            f"SELECT {self._THREAD_COLUMNS} FROM threads WHERE project_id = ?"
-            " ORDER BY updated_at DESC",
+        """A project's threads, most recently active first."""
+        rows: list[tuple[object, ...]] = self._db.execute(
+            f"SELECT {_THREAD_COLUMNS} FROM threads WHERE project_id = ? ORDER BY updated_at DESC",
             (project_id,),
-        )
-        return [Thread(*row) for row in rows]
+        ).fetchall()
+        return [_from_row(Thread, row) for row in rows]
 
     def rename_thread(self, thread_id: int, title: str) -> None:
+        """Change a thread's title."""
         self._update_thread(thread_id, title=title)
 
     def set_provider_session(self, thread_id: int, session_id: str) -> None:
+        """Remember the agent's session id, so the thread can be resumed."""
         self._update_thread(thread_id, provider_session_id=session_id)
 
     def set_thread_model(self, thread_id: int, model: str | None) -> None:
+        """Change a thread's model. None means the agent's default."""
         self._update_thread(thread_id, model=model)
 
     def delete_thread(self, thread_id: int) -> None:
+        """Delete a thread and its events."""
         with self._db:
             self._db.execute("DELETE FROM threads WHERE id = ?", (thread_id,))
 
@@ -190,28 +203,30 @@ class Store:
 
     # Events
 
-    def append_event(self, thread_id: int, event: ev.Event) -> None:
-        payload = json.dumps(dataclasses.asdict(event))
+    def append_event(self, thread_id: int, event: Event) -> None:
+        """Record an event at the end of a thread."""
         now = time.time()
         with self._db:
             self._db.execute(
                 "INSERT INTO events (thread_id, kind, payload, created_at) VALUES (?, ?, ?, ?)",
-                (thread_id, type(event).__name__, payload, now),
+                (thread_id, type(event).__name__, event.model_dump_json(), now),
             )
             self._db.execute("UPDATE threads SET updated_at = ? WHERE id = ?", (now, thread_id))
 
-    def events(self, thread_id: int) -> list[ev.Event]:
-        rows = self._db.execute(
+    def events(self, thread_id: int) -> list[Event]:
+        """A thread's events, oldest first."""
+        rows: list[tuple[str, str]] = self._db.execute(
             "SELECT kind, payload FROM events WHERE thread_id = ? ORDER BY id", (thread_id,)
-        )
+        ).fetchall()
         return [_decode_event(kind, payload) for kind, payload in rows]
 
 
-def _decode_event(kind: str, payload: str) -> ev.Event:
-    data = json.loads(payload)
+def _from_row[M: Model](model: type[M], row: tuple[object, ...]) -> M:
+    return model.model_validate(dict(zip(model.model_fields, row, strict=True)))
+
+
+def _decode_event(kind: str, payload: str) -> Event:
     cls = _EVENT_TYPES.get(kind)
     if cls is None:
-        return ev.Unrecognized({"kind": kind, **data})
-    if cls is ev.TurnCompleted:
-        data["usage"] = ev.TokenUsage(**data["usage"])
-    return cls(**data)
+        return Unrecognized(raw={"kind": kind, "payload": _JSON.validate_json(payload)})
+    return cls.model_validate_json(payload)

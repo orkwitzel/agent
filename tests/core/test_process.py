@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """End-to-end over a real pipe, using the fake claude and the GLib loop."""
 
+from __future__ import annotations
+
 import asyncio
 import contextlib
 import gc
@@ -14,22 +16,8 @@ from pathlib import Path
 import pytest
 
 from agent.core.events import PermissionRequest, TurnCompleted, Unrecognized
-from agent.core.process import (
-    STDERR_TAIL_BYTES,
-    AgentProcess,
-    install_glib_event_loop,
-    run_capture,
-)
-from conftest import FAKE_CLAUDE, FIXTURES
-
-
-def run(coro):
-    install_glib_event_loop()
-    loop = asyncio.new_event_loop()
-    try:
-        return loop.run_until_complete(coro)
-    finally:
-        loop.close()
+from agent.core.process import STDERR_TAIL_BYTES, AgentProcess, run_capture
+from support import FAKE_CLAUDE, FIXTURES, run
 
 
 async def collect(events):
@@ -41,12 +29,12 @@ async def collect(events):
 TIMEOUT = 10
 
 
-async def turn(proc):
+async def turn(process):
     """Iterate events() up to and including TurnCompleted, within TIMEOUT."""
 
     async def read():
         seen = []
-        async with contextlib.aclosing(proc.events()) as events:
+        async with contextlib.aclosing(process.events()) as events:
             async for event in events:
                 seen.append(event)
                 if isinstance(event, TurnCompleted):
@@ -56,19 +44,19 @@ async def turn(proc):
     return await asyncio.wait_for(read(), TIMEOUT)
 
 
-async def one_turn(proc):
-    """Start `proc`, send one message, read the turn and close.
+async def one_turn(process):
+    """Start `process`, send one message, read the turn and close.
 
     Returns (events, exit status). Each step is bounded by TIMEOUT, and
     the process is killed on the way out, whatever happened.
     """
-    proc.start()
+    process.start()
     try:
-        await proc.send_user_message("hello")
-        seen = await turn(proc)
-        return seen, await asyncio.wait_for(proc.close(), TIMEOUT)
+        await process.send_user_message("hello")
+        seen = await turn(process)
+        return seen, await asyncio.wait_for(process.close(), TIMEOUT)
     finally:
-        proc.kill()
+        process.kill()
 
 
 def alive(pid):
@@ -86,7 +74,7 @@ def test_turn_with_auto_allow(tmp_path):
 
     seen, status = run(one_turn(AgentProcess(argv)))
     assert status == 0
-    assert any(isinstance(e, PermissionRequest) for e in seen)
+    assert any(isinstance(event, PermissionRequest) for event in seen)
     assert isinstance(seen[-1], TurnCompleted)
 
     sent = [json.loads(line) for line in record.read_text().splitlines()]
@@ -104,7 +92,10 @@ def test_unknown_control_request_gets_error_reply(tmp_path):
     seen, status = run(one_turn(AgentProcess(argv)))
     assert status == 0
     assert isinstance(seen[-1], TurnCompleted)
-    assert any(isinstance(e, Unrecognized) and e.raw.get("type") == "control_request" for e in seen)
+    assert any(
+        isinstance(event, Unrecognized) and event.raw.get("type") == "control_request"
+        for event in seen
+    )
 
     sent = [json.loads(line) for line in record.read_text().splitlines()]
     assert sent[1] == {
@@ -122,27 +113,28 @@ STDERR_BYTES = 200_000  # well past the 64 KiB pipe buffer
 
 def test_large_stderr_without_callback(monkeypatch):
     monkeypatch.setenv("FAKE_CLAUDE_STDERR_BYTES", str(STDERR_BYTES))
-    proc = AgentProcess([sys.executable, str(FAKE_CLAUDE), str(FIXTURES / "simple_turn.jsonl")])
+    process = AgentProcess([sys.executable, str(FAKE_CLAUDE), str(FIXTURES / "simple_turn.jsonl")])
 
-    seen, status = run(one_turn(proc))
-    assert seen and isinstance(seen[-1], TurnCompleted)
+    seen, status = run(one_turn(process))
+    assert seen
+    assert isinstance(seen[-1], TurnCompleted)
     assert status == 0
-    assert len(proc.stderr_tail.encode()) == STDERR_TAIL_BYTES
+    assert len(process.stderr_tail.encode()) == STDERR_TAIL_BYTES
 
 
 def test_stderr_tail_after_exit(monkeypatch):
     monkeypatch.setenv("FAKE_CLAUDE_STDERR_BYTES", str(STDERR_BYTES))
     lines = []
-    proc = AgentProcess(
+    process = AgentProcess(
         [sys.executable, str(FAKE_CLAUDE), str(FIXTURES / "simple_turn.jsonl")],
         on_stderr=lines.append,
     )
 
-    _seen, status = run(one_turn(proc))
+    _seen, status = run(one_turn(process))
     assert status == 0
     written = "".join(f"{line}\n" for line in lines)
     assert len(written) >= STDERR_BYTES
-    assert proc.stderr_tail == written[-STDERR_TAIL_BYTES:]
+    assert process.stderr_tail == written[-STDERR_TAIL_BYTES:]
 
 
 def test_failing_stderr_callback_keeps_draining(monkeypatch):
@@ -154,12 +146,12 @@ def test_failing_stderr_callback_keeps_draining(monkeypatch):
         if len(lines) == 1:
             raise ValueError("bug in the callback")
 
-    proc = AgentProcess(
+    process = AgentProcess(
         [sys.executable, str(FAKE_CLAUDE), str(FIXTURES / "simple_turn.jsonl")],
         on_stderr=on_stderr,
     )
 
-    seen, status = run(one_turn(proc))
+    seen, status = run(one_turn(process))
     assert isinstance(seen[-1], TurnCompleted)
     assert status == 0
     assert len(lines) > 1
@@ -172,17 +164,17 @@ def test_stderr_tail_after_crash():
         f"sys.stderr.buffer.write('\\u20ac'.encode() * {STDERR_TAIL_BYTES})\n"
         "sys.exit(3)\n"
     )
-    proc = AgentProcess([sys.executable, "-c", script])
+    process = AgentProcess([sys.executable, "-c", script])
 
     async def scenario():
-        proc.start()
+        process.start()
         try:
-            return await asyncio.wait_for(proc.close(), TIMEOUT)
+            return await asyncio.wait_for(process.close(), TIMEOUT)
         finally:
-            proc.kill()
+            process.kill()
 
     assert run(scenario()) == 3
-    assert proc.stderr_tail == "\u20ac" * (STDERR_TAIL_BYTES // 3)
+    assert process.stderr_tail == "\u20ac" * (STDERR_TAIL_BYTES // 3)
 
 
 def test_run_capture():
@@ -194,10 +186,10 @@ def test_events_task_can_be_cancelled():
     argv = [sys.executable, str(FAKE_CLAUDE), str(FIXTURES / "simple_turn.jsonl")]
 
     async def scenario():
-        proc = AgentProcess(argv)
-        proc.start()
+        process = AgentProcess(argv)
+        process.start()
         try:
-            reader = asyncio.ensure_future(collect(proc.events()))
+            reader = asyncio.ensure_future(collect(process.events()))
             await asyncio.sleep(0.2)  # idle: no user message, so no output
             reader.cancel()
             await asyncio.wait([reader], timeout=1)
@@ -208,12 +200,12 @@ def test_events_task_can_be_cancelled():
             del reader
             gc.collect()
             # Only that read was cancelled; the process is still usable.
-            await proc.send_user_message("hello")
-            seen = await turn(proc)
-            status = await asyncio.wait_for(proc.close(), TIMEOUT)
+            await process.send_user_message("hello")
+            seen = await turn(process)
+            status = await asyncio.wait_for(process.close(), TIMEOUT)
             return cancelled, seen, status
         finally:
-            proc.kill()
+            process.kill()
 
     cancelled, seen, status = run(scenario())
     assert cancelled
@@ -227,10 +219,10 @@ def test_cancelling_twice_still_waits_for_the_read():
 
     async def scenario():
         asyncio.get_running_loop().set_exception_handler(lambda _loop, ctx: errors.append(ctx))
-        proc = AgentProcess(argv)
-        proc.start()
+        process = AgentProcess(argv)
+        process.start()
         try:
-            reader = asyncio.ensure_future(collect(proc.events()))
+            reader = asyncio.ensure_future(collect(process.events()))
             await asyncio.sleep(0.2)
             reader.cancel()
             await asyncio.sleep(0)  # the reader is now waiting for the read to end
@@ -242,11 +234,11 @@ def test_cancelling_twice_still_waits_for_the_read():
             del reader
             gc.collect()
             # The cancelled read has ended, so a new one can start on the stream.
-            await proc.send_user_message("hello")
-            await turn(proc)
+            await process.send_user_message("hello")
+            await turn(process)
             return cancelled
         finally:
-            proc.kill()
+            process.kill()
 
     assert run(scenario())
     gc.collect()
@@ -260,16 +252,16 @@ def test_kill_ends_events_while_stdout_stays_open(tmp_path):
     argv = ["sh", "-c", 'sleep 30 & echo $! > "$0"; wait', str(pidfile)]
 
     async def scenario():
-        proc = AgentProcess(argv)
-        proc.start()
-        reader = asyncio.ensure_future(collect(proc.events()))
+        process = AgentProcess(argv)
+        process.start()
+        reader = asyncio.ensure_future(collect(process.events()))
         await asyncio.sleep(0.2)
-        proc.kill()
+        process.kill()
         await asyncio.wait([reader], timeout=1)
         if not reader.done():
             reader.cancel()
             return None, None
-        return reader.result(), await asyncio.wait_for(proc.close(), 1)
+        return reader.result(), await asyncio.wait_for(process.close(), 1)
 
     try:
         seen, status = run(scenario())
@@ -282,15 +274,15 @@ def test_kill_ends_events_while_stdout_stays_open(tmp_path):
 
 def test_close_can_time_out():
     async def scenario():
-        proc = AgentProcess(["sleep", "30"])  # ignores stdin closing
-        proc.start()
+        process = AgentProcess(["sleep", "30"])  # ignores stdin closing
+        process.start()
         started = time.monotonic()
         try:
             with pytest.raises(TimeoutError):
-                await asyncio.wait_for(proc.close(), 1)
+                await asyncio.wait_for(process.close(), 1)
             return time.monotonic() - started
         finally:
-            proc.kill()
+            process.kill()
 
     assert run(scenario()) < 2
 
@@ -306,7 +298,8 @@ def test_run_capture_timeout_kills_child(tmp_path):
         elapsed = time.monotonic() - started
         pid = int(pidfile.read_text())
         deadline = time.monotonic() + 1
-        while alive(pid) and time.monotonic() < deadline:
+        # Polls another process: there is no event to wait on.
+        while alive(pid) and time.monotonic() < deadline:  # noqa: ASYNC110
             await asyncio.sleep(0.01)
         return elapsed, alive(pid)
 
@@ -321,12 +314,12 @@ def test_events_end_at_end_of_stream():
     argv = ["sh", "-c", 'printf \'\\n{"type":"mystery"}\\n\\n\'']
 
     async def scenario():
-        proc = AgentProcess(argv)
-        proc.start()
+        process = AgentProcess(argv)
+        process.start()
         try:
-            return await asyncio.wait_for(collect(proc.events()), TIMEOUT)
+            return await asyncio.wait_for(collect(process.events()), TIMEOUT)
         finally:
-            proc.kill()
+            process.kill()
 
     seen = run(scenario())
     assert [event.raw for event in seen] == [{"type": "mystery"}]  # Unrecognized

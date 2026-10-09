@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """agent.core must stay free of GTK so providers can be tested headless."""
 
+from __future__ import annotations
+
 import ast
 from pathlib import Path
 

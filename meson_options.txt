@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+option(
+  'dev',
+  type: 'boolean',
+  value: false,
+  description: 'Contributor build: adds the lint suite and requires every tool it runs',
+)

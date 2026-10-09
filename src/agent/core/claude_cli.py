@@ -8,15 +8,16 @@ status) and, to sign in, runs `claude auth login`.
 
 from __future__ import annotations
 
-import enum
-import json
 import os
 import shutil
-from dataclasses import dataclass
+from pathlib import Path
+from typing import Literal
 
-from gi.repository import GLib
+from gi.repository import GLib, GObject
+from pydantic import Field, ValidationError
 
 from agent.core import hostspawn
+from agent.core.model import WireModel
 from agent.core.process import run_capture
 
 DOWNLOAD_URL = "https://code.claude.com/docs/en/setup"
@@ -24,23 +25,19 @@ DOWNLOAD_URL = "https://code.claude.com/docs/en/setup"
 # Where Anthropic's installer puts claude, for when PATH doesn't include it.
 _FALLBACK_LOCATIONS = ("~/.local/bin/claude", "~/.claude/local/claude")
 
-
-class ClaudeState(enum.Enum):
-    """What the app can do with the user's claude."""
-
-    READY = enum.auto()
-    SIGNED_OUT = enum.auto()
-    MISSING = enum.auto()
+# What the app can do with the user's claude.
+type ClaudeState = Literal["ready", "signed-out", "missing"]
 
 
-@dataclass(frozen=True)
-class AuthStatus:
-    logged_in: bool
-    method: str | None = None
-    subscription: str | None = None
+class AuthStatus(WireModel):
+    """What `claude auth status` reports. Never includes credentials."""
+
+    logged_in: bool = Field(alias="loggedIn")
+    method: str | None = Field(default=None, alias="authMethod")
+    subscription: str | None = Field(default=None, alias="subscriptionType")
 
 
-def find_claude(configured_path: str = "", *, flatpak: bool | None = None) -> str | None:
+def find_claude(*, configured_path: str = "", flatpak: bool | None = None) -> str | None:
     """Resolve the claude executable.
 
     Natively: the configured path, PATH, then the installer's locations.
@@ -61,21 +58,24 @@ def find_claude(configured_path: str = "", *, flatpak: bool | None = None) -> st
         if found:
             return found
     for candidate in _FALLBACK_LOCATIONS:
-        path = os.path.expanduser(candidate)
+        path = Path(candidate).expanduser()
         if os.access(path, os.X_OK):
-            return path
+            return str(path)
     return "claude" if flatpak else None
 
 
 def auth_status_argv(claude_path: str) -> list[str]:
+    """Ask claude whether the user is signed in; prints JSON."""
     return [claude_path, "auth", "status"]
 
 
 def auth_login_argv(claude_path: str) -> list[str]:
+    """Let claude sign the user in, in its own interactive flow."""
     return [claude_path, "auth", "login"]
 
 
 def version_argv(claude_path: str) -> list[str]:
+    """Print claude's version; exits 0 if claude runs at all."""
     return [claude_path, "--version"]
 
 
@@ -90,28 +90,21 @@ def parse_auth_status(output: str) -> AuthStatus | None:
     `claude --version` to tell them apart.
     """
     try:
-        data = json.loads(output)
-    except json.JSONDecodeError:
+        return AuthStatus.model_validate_json(output)
+    except ValidationError:
         return None
-    if not isinstance(data, dict) or not isinstance(data.get("loggedIn"), bool):
-        return None
-    return AuthStatus(
-        logged_in=data["loggedIn"],
-        method=data.get("authMethod"),
-        subscription=data.get("subscriptionType"),
-    )
 
 
-async def check_claude(configured_path: str = "", *, flatpak: bool | None = None) -> ClaudeState:
+async def check_claude(*, configured_path: str = "", flatpak: bool | None = None) -> ClaudeState:
     """Find claude and ask it whether the user is signed in.
 
     The exit status of `claude auth status` is ignored: claude exits 1
     when signed out. If it prints no status (see `parse_auth_status`),
     `claude --version` decides: if claude runs at all, offer to sign in.
     """
-    claude = find_claude(configured_path, flatpak=flatpak)
+    claude = find_claude(configured_path=configured_path, flatpak=flatpak)
     if claude is None:
-        return ClaudeState.MISSING
+        return "missing"
     try:
         _status, output = await run_capture(
             hostspawn.host_argv(auth_status_argv(claude), flatpak=flatpak)
@@ -121,7 +114,34 @@ async def check_claude(configured_path: str = "", *, flatpak: bool | None = None
             status, _output = await run_capture(
                 hostspawn.host_argv(version_argv(claude), flatpak=flatpak)
             )
-            return ClaudeState.SIGNED_OUT if status == 0 else ClaudeState.MISSING
+            return "signed-out" if status == 0 else "missing"
     except GLib.Error:  # Couldn't spawn it.
-        return ClaudeState.MISSING
-    return ClaudeState.READY if auth.logged_in else ClaudeState.SIGNED_OUT
+        return "missing"
+    return "ready" if auth.logged_in else "signed-out"
+
+
+class ClaudeStatus(GObject.Object):
+    """Whether claude can be used, as a property the UI binds to.
+
+    `state` is "checking" while a check runs, then a `ClaudeState`.
+    """
+
+    __gtype_name__ = "AgentClaudeStatus"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._state: Literal["checking"] | ClaudeState = "checking"
+
+    @GObject.Property(type=str, flags=GObject.ParamFlags.READABLE)
+    def state(self) -> str:
+        """Either "checking" or the outcome of the last check."""
+        return self._state
+
+    async def check(self, *, configured_path: str) -> None:
+        """Check claude again; `state` follows."""
+        self._set_state("checking")
+        self._set_state(await check_claude(configured_path=configured_path))
+
+    def _set_state(self, state: Literal["checking"] | ClaudeState) -> None:
+        self._state = state
+        self.notify("state")

@@ -1,5 +1,16 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-from agent.core.events import AssistantText, TokenUsage, ToolCall, TurnCompleted
+from __future__ import annotations
+
+import sqlite3
+
+from agent.core.events import (
+    AssistantText,
+    SessionStarted,
+    TokenUsage,
+    ToolCall,
+    TurnCompleted,
+    Unrecognized,
+)
 from agent.core.store import Store, database_path
 
 
@@ -25,13 +36,36 @@ def test_events_round_trip(tmp_path):
     store = Store(tmp_path / "agent.db")
     thread = store.create_thread(store.add_project("/p"), "t")
     events = [
-        AssistantText("hi"),
-        ToolCall("toolu_1", "Bash", {"command": "ls"}),
-        TurnCompleted("sess", False, 10, TokenUsage(1, 2, 3, 4), "done"),
+        SessionStarted(session_id="sess", tools=("Read", "Bash")),
+        AssistantText(text="hi"),
+        ToolCall(tool_call_id="toolu_1", name="Bash", input={"command": "ls"}),
+        TurnCompleted(
+            session_id="sess",
+            is_error=False,
+            duration_ms=10,
+            usage=TokenUsage(
+                input_tokens=1, output_tokens=2, cache_read_tokens=3, cache_creation_tokens=4
+            ),
+            result="done",
+        ),
     ]
     for event in events:
         store.append_event(thread.id, event)
     assert store.events(thread.id) == events
+
+
+def test_event_of_unknown_kind_is_kept(tmp_path):
+    path = tmp_path / "agent.db"
+    store = Store(path)
+    thread = store.create_thread(store.add_project("/p"), "t")
+    with sqlite3.connect(path) as db:
+        db.execute(
+            "INSERT INTO events (thread_id, kind, payload, created_at) VALUES (?, ?, ?, ?)",
+            (thread.id, "RemovedEvent", '{"text": "old"}', 0.0),
+        )
+    assert store.events(thread.id) == [
+        Unrecognized(raw={"kind": "RemovedEvent", "payload": {"text": "old"}})
+    ]
 
 
 def test_reopen_keeps_data(tmp_path):
@@ -46,7 +80,7 @@ def test_removing_project_removes_threads(tmp_path):
     store = Store(tmp_path / "agent.db")
     project = store.add_project("/p")
     thread = store.create_thread(project, "t")
-    store.append_event(thread.id, AssistantText("hi"))
+    store.append_event(thread.id, AssistantText(text="hi"))
     store.remove_project(project.id)
     assert store.projects() == []
     assert store.events(thread.id) == []

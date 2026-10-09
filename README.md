@@ -34,7 +34,7 @@ your projects needs your real toolchain. It is not meaningfully sandboxed.
 ## Building from source
 
 ```sh
-sudo dnf install glib2-devel blueprint-compiler meson python3-markdown-it-py   # Fedora
+sudo dnf install glib2-devel blueprint-compiler meson python3-markdown-it-py python3-pydantic   # Fedora
 meson setup build --prefix=$PWD/_install
 meson install -C build
 GSETTINGS_SCHEMA_DIR=_install/share/glib-2.0/schemas _install/bin/agent
@@ -45,16 +45,9 @@ Or open the folder in GNOME Builder and run it with the Flatpak manifest in
 
 ## Development
 
-```sh
-python3 -m venv --system-site-packages .venv
-.venv/bin/pip install meson ninja ruff pytest markdown-it-py
-.venv/bin/pytest
-.venv/bin/ruff check .
-```
-
-The tests replay recorded `claude` output through a fake `claude`
-(`tests/fake_claude.py`), so they don't need Claude Code or use any usage.
-See `docs/design.md` for the architecture and the reasoning behind it.
+See `CONTRIBUTING.md` for setting up, running the checks and the code
+standards, and `docs/design.md` for the architecture and the reasoning
+behind it.
 
 ## License
 
